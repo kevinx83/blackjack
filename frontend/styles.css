@@ -541,6 +541,43 @@ p {
   font-weight: 800;
 }
 
+.total-row,
+.sim-total-row {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.total-badge {
+  display: grid;
+  gap: 2px;
+  min-width: 118px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(247, 245, 239, 0.96);
+  color: var(--ink);
+  text-align: center;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.14);
+}
+
+.total-badge span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.total-badge strong {
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.multi-hand-zone > .total-badge {
+  justify-self: center;
+}
+
 .sim-message {
   padding: 12px 14px;
   border-radius: 8px;
@@ -597,6 +634,19 @@ p {
 .sim-hand-foot {
   color: rgba(255, 255, 255, 0.78);
   font-size: 13px;
+}
+
+.sim-total-row {
+  justify-content: flex-start;
+}
+
+.sim-total-row .total-badge {
+  min-width: 96px;
+  padding: 8px 10px;
+}
+
+.sim-total-row .total-badge strong {
+  font-size: 17px;
 }
 
 .compact-row {

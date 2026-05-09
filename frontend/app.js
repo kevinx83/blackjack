@@ -46,6 +46,33 @@ function isPair(cards) {
   return cards.length === 2 && rankValue(cards[0]) === rankValue(cards[1]);
 }
 
+function handStats(cards) {
+  let total = cards.reduce((sum, rank) => sum + rankValue(rank), 0);
+  let aces = cards.filter((rank) => rank === "A").length;
+  while (total > 21 && aces > 0) {
+    total -= 10;
+    aces -= 1;
+  }
+  return {
+    total,
+    isSoft: aces > 0 && total <= 21,
+    isBust: total > 21,
+    isBlackjack: cards.length === 2 && total === 21,
+  };
+}
+
+function handTotalLabel(stats) {
+  if (stats.isBlackjack) return "Blackjack";
+  if (stats.isBust) return `Bust ${stats.total}`;
+  return `${stats.isSoft ? "Soft" : "Hard"} ${stats.total}`;
+}
+
+function upcardTotalLabel(rank) {
+  if (!rank) return "--";
+  if (rank === "A") return "11 / 1";
+  return String(rankValue(rank));
+}
+
 function App() {
   const [page, setPage] = useState("home");
 
@@ -102,14 +129,15 @@ function SolverPage({ navigate }) {
   const canRecommend = dealer && player.length >= 2;
   const canDouble = player.length === 2;
   const canSplit = isPair(player);
+  const playerStats = useMemo(() => handStats(player), [player]);
 
   const handLabel = useMemo(() => {
-    if (!result) return "No hand";
+    if (!result) return player.length ? handTotalLabel(playerStats) : "No hand";
     const mode = result.hand.is_soft ? "Soft" : "Hard";
     if (result.hand.is_blackjack) return "Blackjack";
     if (result.hand.is_bust) return "Bust";
     return `${mode} ${result.hand.total}`;
-  }, [result]);
+  }, [player.length, playerStats, result]);
 
   function setRule(key, value) {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -207,7 +235,8 @@ function SolverPage({ navigate }) {
       h("section", { className: "table" },
         h("div", { className: "dealer-zone" },
           h("div", { className: "zone-label" }, "Dealer"),
-          h(CardSlot, { label: dealer || "Upcard", filled: Boolean(dealer), onRemove: () => setDealer("") })
+          h(CardSlot, { label: dealer || "Upcard", filled: Boolean(dealer), onRemove: () => setDealer("") }),
+          h(TotalBadge, { label: "Upcard Value", value: dealer ? upcardTotalLabel(dealer) : "--" })
         ),
         h(RecommendationPanel, {
           recommendation: result && result.recommendation,
@@ -225,7 +254,8 @@ function SolverPage({ navigate }) {
                   onRemove: () => removePlayer(index),
                 }))
               : h(CardSlot, { label: "Empty", filled: false })
-          )
+          ),
+          h(TotalBadge, { label: "Player Total", value: player.length ? handTotalLabel(playerStats) : "--" })
         )
       ),
       h("section", { className: "actions-grid" },
@@ -352,8 +382,15 @@ function SimulationPage({ navigate }) {
               ? simState.dealer.cards.map((card, index) => h(DisplayCard, { card, key: `${card.label}-${index}` }))
               : h(DisplayCard, { card: null })
           ),
-          h("div", { className: "table-total" },
-            simState && simState.dealer.revealed ? `Dealer ${simState.dealer.total}` : "Dealer total hidden"
+          h("div", { className: "total-row" },
+            h(TotalBadge, {
+              label: "Upcard Value",
+              value: simState && simState.dealer.cards[0] ? upcardTotalLabel(simState.dealer.cards[0].rank) : "--",
+            }),
+            h(TotalBadge, {
+              label: "Dealer Total",
+              value: simState && simState.dealer.revealed ? dealerTotalLabel(simState.dealer) : "Hidden",
+            })
           )
         ),
         h(RecommendationPanel, {
@@ -363,6 +400,7 @@ function SimulationPage({ navigate }) {
         }),
         h("div", { className: "player-zone multi-hand-zone" },
           h("div", { className: "zone-label" }, "Player"),
+          h(TotalBadge, { label: "Active Player Total", value: activeHand ? handSummary(activeHand) : "--" }),
           h("div", { className: "sim-hands" },
             simState && simState.hands.length
               ? simState.hands.map((hand) => h(SimHandView, { hand, key: hand.index }))
@@ -524,6 +562,13 @@ function Stat({ label, value }) {
   );
 }
 
+function TotalBadge({ label, value }) {
+  return h("div", { className: "total-badge" },
+    h("span", null, label),
+    h("strong", null, value)
+  );
+}
+
 function Toggle({ label, checked, onChange }) {
   return h("label", { className: "toggle" },
     h("input", {
@@ -577,11 +622,20 @@ function SimHandView({ hand }) {
     h("div", { className: "hand-row compact-row" },
       hand.cards.map((card, index) => h(DisplayCard, { card, key: `${hand.index}-${index}` }))
     ),
+    h("div", { className: "sim-total-row" },
+      h(TotalBadge, { label: "Player Total", value: handSummary(hand) }),
+      h(TotalBadge, { label: "Bet", value: formatUnits(hand.bet) })
+    ),
     h("div", { className: "sim-hand-foot" },
-      h("span", null, `Bet ${formatUnits(hand.bet)}`),
       h("span", null, hand.result ? `${hand.result} ${formatUnits(hand.payout)}` : hand.status)
     )
   );
+}
+
+function dealerTotalLabel(dealer) {
+  if (!dealer) return "--";
+  if (dealer.is_bust) return `Bust ${dealer.total}`;
+  return `${dealer.is_soft ? "Soft" : "Hard"} ${dealer.total}`;
 }
 
 function handSummary(hand) {
