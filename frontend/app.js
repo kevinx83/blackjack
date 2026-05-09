@@ -359,11 +359,13 @@ function SimulationPage({ navigate }) {
     });
   }
 
-  const recommendation = simState && simState.recommendation;
   const activeHand = simState && simState.hands.find((hand) => hand.active);
   const handLabel = activeHand ? handSummary(activeHand) : "No active hand";
   const legalActions = simState ? simState.legal_actions : [];
   const phase = simState ? simState.phase : "idle";
+  const decisionLog = simState && simState.decision_log ? simState.decision_log : [];
+  const lastDecision = phase === "round_over" && decisionLog.length ? decisionLog[decisionLog.length - 1] : null;
+  const revealedRecommendation = lastDecision ? lastDecision.recommendation : null;
 
   return h("div", { className: "app-shell sim-shell" },
     h("aside", { className: "sidebar" },
@@ -402,9 +404,14 @@ function SimulationPage({ navigate }) {
           )
         ),
         h(RecommendationPanel, {
-          recommendation,
-          handLabel,
-          reasoning: recommendation ? recommendation.reasoning : "Deal a round to get a live recommendation",
+          recommendation: revealedRecommendation,
+          handLabel: revealedRecommendation ? `You chose ${lastDecision.chosen_action}` : handLabel,
+          hidden: phase === "player",
+          reasoning: phase === "player"
+            ? "Recommendation hidden until the round is complete"
+            : revealedRecommendation
+              ? revealedRecommendation.reasoning
+              : "Deal a round and make your own decisions"
         }),
         h("div", { className: "player-zone multi-hand-zone" },
           h("div", { className: "zone-label" }, "Player"),
@@ -434,13 +441,12 @@ function SimulationPage({ navigate }) {
           h("div", { className: "panel-title" }, "Player Action"),
           h("div", { className: "play-actions" },
             ["HIT", "STAND", "DOUBLE", "SPLIT", "SURRENDER"].map((action) => {
-              const recommended = recommendation && recommendation.action === action;
               return h("button", {
                 key: action,
-                className: recommended ? `play-action recommended ${ACTION_CLASS[action] || ""}` : "play-action",
+                className: "play-action",
                 onClick: () => play(action),
                 disabled: busy || !legalActions.includes(action),
-              }, recommended ? `${action} *` : action);
+              }, action);
             })
           )
         ),
@@ -452,9 +458,36 @@ function SimulationPage({ navigate }) {
                 h("strong", null, hand.result ? `${hand.result} (${formatUnits(hand.payout)})` : hand.status)
               ))
             : h("span", { className: "muted" }, "No results")
-        )
+        ),
+        h(DecisionReviewPanel, { decisions: decisionLog, phase })
       )
     )
+  );
+}
+
+function DecisionReviewPanel({ decisions, phase }) {
+  return h("div", { className: "panel review-panel" },
+    h("div", { className: "panel-title" }, "Decision Review"),
+    phase === "player"
+      ? h("span", { className: "muted" }, "Recommendations are hidden until the round is over.")
+      : decisions.length
+        ? h("div", { className: "decision-list" },
+            decisions.map((decision, index) => h("div", {
+              className: decision.matched ? "decision-row matched" : "decision-row missed",
+              key: `decision-${index}`,
+            },
+              h("div", { className: "decision-main" },
+                h("strong", null, `Hand ${decision.hand_index + 1}: ${decision.chosen_action}`),
+                h("span", null, `Engine: ${decision.recommendation ? decision.recommendation.action : "--"}`)
+              ),
+              h("div", { className: "decision-meta" },
+                h("span", null, `Player ${decision.is_soft ? "soft" : "hard"} ${decision.player_total}`),
+                h("span", null, `TC ${formatSigned(decision.true_count)}`),
+                h("span", null, decision.matched ? "Matched" : "Different")
+              )
+            ))
+          )
+        : h("span", { className: "muted" }, "No player decisions to review this round.")
   );
 }
 
@@ -514,16 +547,18 @@ function SettingsPanel({ settings, setRule, actionLabel, onAction, busy }) {
   );
 }
 
-function RecommendationPanel({ recommendation, handLabel, reasoning }) {
-  return h("div", { className: "recommendation" },
-    h("div", { className: "rec-label" }, "Recommendation"),
-    recommendation
-      ? h("div", { className: `rec-action ${ACTION_CLASS[recommendation.action] || ""}` }, recommendation.action)
-      : h("div", { className: "rec-action empty" }, "--"),
+function RecommendationPanel({ recommendation, handLabel, reasoning, hidden = false }) {
+  return h("div", { className: hidden ? "recommendation hidden-recommendation" : "recommendation" },
+    h("div", { className: "rec-label" }, hidden ? "Practice Mode" : "Recommendation"),
+    hidden
+      ? h("div", { className: "rec-action empty" }, "Hidden")
+      : recommendation
+        ? h("div", { className: `rec-action ${ACTION_CLASS[recommendation.action] || ""}` }, recommendation.action)
+        : h("div", { className: "rec-action empty" }, "--"),
     h("div", { className: "rec-meta" },
       h("span", null, handLabel),
-      h("span", null, recommendation ? `Code ${recommendation.raw_code}` : "Code --"),
-      h("span", null, recommendation && recommendation.is_deviation ? "Deviation" : "Basic")
+      h("span", null, hidden ? "No hint" : recommendation ? `Code ${recommendation.raw_code}` : "Code --"),
+      h("span", null, hidden ? "Review later" : recommendation && recommendation.is_deviation ? "Deviation" : "Basic")
     ),
     h("div", { className: "reasoning" }, reasoning)
   );
@@ -543,7 +578,6 @@ function CountPanel({ state }) {
     )
   );
 }
-
 function BetPanel({ betting, roundBetting, mode }) {
   const current = betting || null;
   const round = roundBetting || null;

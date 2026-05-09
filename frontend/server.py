@@ -6,7 +6,7 @@ import json
 import mimetypes
 import random
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -255,6 +255,7 @@ class BlackjackSimulation:
         self.observed_cards: list[str] = []
         self.stats = SimStats()
         self.round_betting: dict | None = None
+        self.decision_log: list[dict] = []
         self.shuffle_shoe()
 
     def start(self, payload: dict) -> dict:
@@ -282,6 +283,7 @@ class BlackjackSimulation:
         self.phase = "idle"
         self.message = "New simulated shoe started."
         self.round_betting = None
+        self.decision_log = []
         self.shuffle_shoe()
         return self.state()
 
@@ -304,6 +306,7 @@ class BlackjackSimulation:
         self.hands = []
         self.dealer_cards = []
         self.dealer_revealed = False
+        self.decision_log = []
         self.active_hand_index = 0
         self.phase = "player"
         self.stats.rounds += 1
@@ -349,6 +352,9 @@ class BlackjackSimulation:
         hand = self.hands[self.active_hand_index]
         if hand.status != "active":
             raise ValueError("Selected hand is not active")
+
+        recommendation = self.active_recommendation()
+        decision = self.decision_payload(hand, self.active_hand_index, action, recommendation)
 
         if action == "HIT":
             hand.cards.append(self.draw_visible())
@@ -409,6 +415,7 @@ class BlackjackSimulation:
         else:
             raise ValueError("Unknown action")
 
+        self.decision_log.append(decision)
         return self.state()
 
     def draw_visible(self) -> Card:
@@ -530,6 +537,27 @@ class BlackjackSimulation:
 
         return recommendation_payload(recommendation)
 
+    def decision_payload(
+        self,
+        hand: SimHand,
+        hand_index: int,
+        chosen_action: str,
+        recommendation: dict | None,
+    ) -> dict:
+        computed = hand.as_hand()
+        return {
+            "hand_index": hand_index,
+            "player_cards": [card_payload(card) for card in hand.cards],
+            "dealer_upcard": card_payload(self.dealer_cards[0]) if self.dealer_cards else None,
+            "player_total": computed.total,
+            "is_soft": computed.is_soft,
+            "is_pair": computed.is_pair,
+            "chosen_action": chosen_action,
+            "recommendation": recommendation,
+            "matched": bool(recommendation and recommendation["action"] == chosen_action),
+            "true_count": recommendation["true_count"] if recommendation else self.advisor.counter.true_count(),
+        }
+
     def hand_payload(self, hand: SimHand, index: int) -> dict:
         computed = hand.as_hand()
         return {
@@ -576,7 +604,9 @@ class BlackjackSimulation:
             },
             "hands": [self.hand_payload(hand, index) for index, hand in enumerate(self.hands)],
             "active_hand_index": self.active_hand_index,
-            "recommendation": self.active_recommendation(),
+            "recommendation": None,
+            "recommendation_hidden": self.phase == "player",
+            "decision_log": self.decision_log if self.phase == "round_over" else [],
             "legal_actions": self.legal_actions(),
             "count": count_payload(counter),
             "betting": {

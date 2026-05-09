@@ -508,6 +508,10 @@ p {
   text-align: center;
 }
 
+.hidden-recommendation {
+  background: rgba(237, 232, 218, 0.96);
+}
+
 .rec-label {
   color: var(--muted);
   font-size: 12px;
@@ -734,6 +738,57 @@ p {
 .play-action.recommended {
   border-color: var(--gold);
   background: #fff3cf;
+}
+
+.review-panel {
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.decision-list {
+  display: grid;
+  gap: 8px;
+}
+
+.decision-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr);
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.decision-row.matched {
+  border-left: 5px solid #1f7c49;
+}
+
+.decision-row.missed {
+  border-left: 5px solid var(--red);
+}
+
+.decision-main,
+.decision-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.decision-main strong {
+  color: var(--ink);
+}
+
+.decision-main span,
+.decision-meta span {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .result-panel {
