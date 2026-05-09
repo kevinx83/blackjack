@@ -28,7 +28,7 @@ dist/
 # Logs and runtime output
 *.log
 logs/
-data/session_logs.json
+data/
 
 # IDE/editor files
 .idea/
