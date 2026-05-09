@@ -255,6 +255,7 @@ class BlackjackSimulation:
         self.observed_cards: list[str] = []
         self.stats = SimStats()
         self.round_betting: dict | None = None
+        self.round_player_bet: int | None = None
         self.decision_log: list[dict] = []
         self.shuffle_shoe()
 
@@ -283,6 +284,7 @@ class BlackjackSimulation:
         self.phase = "idle"
         self.message = "New simulated shoe started."
         self.round_betting = None
+        self.round_player_bet = None
         self.decision_log = []
         self.shuffle_shoe()
         return self.state()
@@ -296,12 +298,16 @@ class BlackjackSimulation:
         ]
         random.shuffle(self.shoe)
 
-    def new_round(self) -> dict:
+    def new_round(self, payload: dict | None = None) -> dict:
         if len(self.shoe) < 16:
             self.shuffle_shoe()
             self.advisor.new_shoe()
             self.observed_cards = []
             self.message = "Shoe was low and has been reshuffled."
+
+        selected_bet = int((payload or {}).get("bet_units", 1))
+        if selected_bet < 1 or selected_bet > 20:
+            raise ValueError("Bet units must be between 1 and 20")
 
         self.hands = []
         self.dealer_cards = []
@@ -311,12 +317,12 @@ class BlackjackSimulation:
         self.phase = "player"
         self.stats.rounds += 1
         self.round_betting = betting_payload(self.advisor.counter)
-        round_units = self.round_betting["recommended_units"]
+        self.round_player_bet = selected_bet
 
         player_cards = [self.draw_visible(), self.draw_visible()]
         dealer_upcard = self.draw_visible()
         dealer_hole = self.draw_hidden()
-        self.hands = [SimHand(player_cards, bet=round_units)]
+        self.hands = [SimHand(player_cards, bet=selected_bet)]
         self.dealer_cards = [dealer_upcard, dealer_hole]
 
         player_hand = self.hands[0].as_hand()
@@ -330,7 +336,7 @@ class BlackjackSimulation:
                 self.finish_hand(self.hands[0], "push", 0.0)
                 self.message = "Both player and dealer have blackjack."
             elif player_has_blackjack:
-                self.finish_hand(self.hands[0], "blackjack", 1.5)
+                self.finish_hand(self.hands[0], "blackjack", self.hands[0].bet * 1.5)
                 self.stats.blackjacks += 1
                 self.message = "Player blackjack pays 3:2."
             else:
@@ -610,8 +616,10 @@ class BlackjackSimulation:
             "legal_actions": self.legal_actions(),
             "count": count_payload(counter),
             "betting": {
-                "next_hand": betting_payload(counter),
-                "round": self.round_betting,
+                "next_hand": None,
+                "round": self.round_betting if self.phase == "round_over" else None,
+                "player_round_units": self.round_player_bet if self.hands else None,
+                "recommendation_hidden": self.phase != "round_over",
             },
             "stats": {
                 "rounds": self.stats.rounds,
@@ -673,7 +681,7 @@ class BlackjackRequestHandler(BaseHTTPRequestHandler):
             elif route == "/api/sim/start":
                 self.send_json(SIMULATION.start(payload))
             elif route == "/api/sim/new-round":
-                self.send_json(SIMULATION.new_round())
+                self.send_json(SIMULATION.new_round(payload))
             elif route == "/api/sim/action":
                 self.send_json(SIMULATION.player_action(payload))
             else:

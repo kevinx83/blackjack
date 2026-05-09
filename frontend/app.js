@@ -313,6 +313,7 @@ function SolverPage({ navigate }) {
 function SimulationPage({ navigate }) {
   const [settings, setSettings] = useState({ num_decks: 6, das: true, s17: true, surrender: true });
   const [simState, setSimState] = useState(null);
+  const [playerBet, setPlayerBet] = useState(1);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -347,7 +348,7 @@ function SimulationPage({ navigate }) {
 
   async function dealRound() {
     await runAction(async () => {
-      const payload = await api("/api/sim/new-round", {});
+      const payload = await api("/api/sim/new-round", { bet_units: playerBet });
       setSimState(payload);
     });
   }
@@ -372,11 +373,7 @@ function SimulationPage({ navigate }) {
       h(BrandBlock, { subtitle: "Simulation", navigate }),
       h(SettingsPanel, { settings, setRule, actionLabel: "Start Game", onAction: startGame, busy }),
       h(CountPanel, { state: simState }),
-      h(BetPanel, {
-        betting: simState && simState.betting && simState.betting.next_hand,
-        roundBetting: simState && simState.betting && simState.betting.round,
-        mode: "simulation",
-      }),
+      h(SimulationBetPanel, { simState, playerBet, setPlayerBet, phase, busy }),
       h(StatsPanel, { stats: simState && simState.stats, shoeCards: simState && simState.shoe_cards_remaining }),
       h(ObservedPanel, { cards: simState && simState.observed_cards })
     ),
@@ -427,11 +424,11 @@ function SimulationPage({ navigate }) {
         h("div", { className: "panel control-stack" },
           h("div", { className: "panel-title" }, "Game"),
           h("div", { className: "round-status" },
-            h("span", null, simState && simState.betting && simState.betting.next_hand
-              ? `Next bet ${simState.betting.next_hand.recommended_units} units`
-              : "Next bet --"),
+            h("span", null, `Selected bet ${playerBet} unit${playerBet === 1 ? "" : "s"}`),
             h("span", null, simState && simState.betting && simState.betting.round
-              ? `This round ${simState.betting.round.recommended_units} units`
+              ? `Recommended ${simState.betting.round.recommended_units} units`
+              : simState && simState.betting && simState.betting.player_round_units
+                ? `This round ${simState.betting.player_round_units} units`
               : "This round --")
           ),
           h("button", { className: "primary", onClick: dealRound, disabled: busy || phase === "player" }, "Deal Round"),
@@ -592,6 +589,45 @@ function BetPanel({ betting, roundBetting, mode }) {
       h("span", null, "This Round"),
       h("strong", null, round ? `${round.recommended_units} unit${round.recommended_units === 1 ? "" : "s"}` : "--"),
       h("em", null, round ? `Locked before deal at TC ${formatSigned(round.true_count)}` : "Locks before cards are counted")
+    )
+  );
+}
+
+function SimulationBetPanel({ simState, playerBet, setPlayerBet, phase, busy }) {
+  const betting = simState && simState.betting;
+  const roundRecommendation = betting && betting.round;
+  const roundPlayerBet = betting && betting.player_round_units;
+  const locked = phase === "player";
+
+  function updateBet(value) {
+    const next = Math.max(1, Math.min(20, Number(value) || 1));
+    setPlayerBet(next);
+  }
+
+  return h("section", { className: "panel bet-panel" },
+    h("div", { className: "panel-title" }, "Bet Practice"),
+    h("label", { className: "field bet-field" },
+      h("span", null, "Your Next Bet"),
+      h("input", {
+        type: "number",
+        min: "1",
+        max: "20",
+        value: playerBet,
+        disabled: busy || locked,
+        onChange: (event) => updateBet(event.target.value),
+      })
+    ),
+    h("div", { className: "bet-card primary-bet" },
+      h("span", null, "This Round"),
+      h("strong", null, roundPlayerBet ? `${roundPlayerBet} unit${roundPlayerBet === 1 ? "" : "s"}` : "--"),
+      h("em", null, roundPlayerBet ? "Your locked bet" : "Choose before dealing")
+    ),
+    h("div", { className: "bet-card" },
+      h("span", null, "Engine Recommendation"),
+      h("strong", null, roundRecommendation ? `${roundRecommendation.recommended_units} unit${roundRecommendation.recommended_units === 1 ? "" : "s"}` : "Hidden"),
+      h("em", null, roundRecommendation
+        ? `Was based on pre-round TC ${formatSigned(roundRecommendation.true_count)}`
+        : "Reveals after the round")
     )
   );
 }
