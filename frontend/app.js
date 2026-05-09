@@ -31,6 +31,11 @@ function formatNumber(value, digits = 2) {
   return Number(value || 0).toFixed(digits);
 }
 
+function formatUnits(value) {
+  const number = Number(value || 0);
+  return Number.isInteger(number) ? String(number) : number.toFixed(1);
+}
+
 function rankValue(rank) {
   if (rank === "A") return 11;
   if (["10", "J", "Q", "K"].includes(rank)) return 10;
@@ -42,6 +47,42 @@ function isPair(cards) {
 }
 
 function App() {
+  const [page, setPage] = useState("home");
+
+  if (page === "solver") {
+    return h(SolverPage, { navigate: setPage });
+  }
+  if (page === "simulation") {
+    return h(SimulationPage, { navigate: setPage });
+  }
+  return h(HomePage, { navigate: setPage });
+}
+
+function HomePage({ navigate }) {
+  return h("main", { className: "home-screen" },
+    h("div", { className: "home-brand" },
+      h("div", { className: "mark large-mark" }, "BJ"),
+      h("div", null,
+        h("h1", null, "Blackjack Advisor"),
+        h("p", null, "Choose a practice mode")
+      )
+    ),
+    h("section", { className: "mode-grid" },
+      h("button", { className: "mode-card", onClick: () => navigate("simulation") },
+        h("span", { className: "mode-kicker" }, "Game Mode"),
+        h("strong", null, "Simulation"),
+        h("span", null, "Play through a shuffled shoe with live count, stats, and recommendations.")
+      ),
+      h("button", { className: "mode-card", onClick: () => navigate("solver") },
+        h("span", { className: "mode-kicker" }, "Manual Mode"),
+        h("strong", null, "Solver"),
+        h("span", null, "Enter cards yourself, update the count, and query the strategy engine.")
+      )
+    )
+  );
+}
+
+function SolverPage({ navigate }) {
   const [settings, setSettings] = useState({ num_decks: 6, das: true, s17: true, surrender: true });
   const [state, setState] = useState(null);
   const [dealer, setDealer] = useState("");
@@ -155,73 +196,24 @@ function App() {
 
   return h("div", { className: "app-shell" },
     h("aside", { className: "sidebar" },
-      h("div", { className: "brand-row" },
-        h("div", { className: "mark" }, "BJ"),
-        h("div", null,
-          h("h1", null, "Blackjack Advisor"),
-          h("p", null, "Manual MVP")
-        )
-      ),
-      h("section", { className: "panel" },
-        h("div", { className: "panel-title" }, "Shoe"),
-        h("label", { className: "field" },
-          h("span", null, "Decks"),
-          h("input", {
-            type: "number",
-            min: "1",
-            max: "8",
-            value: settings.num_decks,
-            onChange: (event) => setRule("num_decks", Number(event.target.value)),
-          })
-        ),
-        h(Toggle, {
-          label: "Double after split",
-          checked: settings.das,
-          onChange: (value) => setRule("das", value),
-        }),
-        h(Toggle, {
-          label: "Dealer stands S17",
-          checked: settings.s17,
-          onChange: (value) => setRule("s17", value),
-        }),
-        h(Toggle, {
-          label: "Late surrender",
-          checked: settings.surrender,
-          onChange: (value) => setRule("surrender", value),
-        }),
-        h("button", { className: "primary full", onClick: startShoe, disabled: busy }, "Start Shoe")
-      ),
+      h(BrandBlock, { subtitle: "Solver", navigate }),
+      h(SettingsPanel, { settings, setRule, actionLabel: "Start Shoe", onAction: startShoe, busy }),
       h(CountPanel, { state }),
-      h("section", { className: "panel observed-panel" },
-        h("div", { className: "panel-title" }, "Observed"),
-        h("div", { className: "observed-list" },
-          state && state.observed_cards.length
-            ? state.observed_cards.map((card, index) => h("span", { className: "mini-card", key: `${card}-${index}` }, card))
-            : h("span", { className: "muted" }, "None")
-        )
-      )
+      h(ObservedPanel, { cards: state && state.observed_cards })
     ),
     h("main", { className: "workspace" },
+      h(PageNav, { active: "solver", navigate }),
       message && h("div", { className: "message" }, message),
       h("section", { className: "table" },
         h("div", { className: "dealer-zone" },
           h("div", { className: "zone-label" }, "Dealer"),
           h(CardSlot, { label: dealer || "Upcard", filled: Boolean(dealer), onRemove: () => setDealer("") })
         ),
-        h("div", { className: "recommendation" },
-          h("div", { className: "rec-label" }, "Recommendation"),
-          result
-            ? h("div", { className: `rec-action ${ACTION_CLASS[result.recommendation.action] || ""}` }, result.recommendation.action)
-            : h("div", { className: "rec-action empty" }, "--"),
-          h("div", { className: "rec-meta" },
-            h("span", null, handLabel),
-            h("span", null, result ? `Code ${result.recommendation.raw_code}` : "Code --"),
-            h("span", null, result && result.recommendation.is_deviation ? "Deviation" : "Basic")
-          ),
-          h("div", { className: "reasoning" },
-            result ? result.recommendation.reasoning : "No recommendation"
-          )
-        ),
+        h(RecommendationPanel, {
+          recommendation: result && result.recommendation,
+          handLabel,
+          reasoning: result ? result.recommendation.reasoning : "No recommendation",
+        }),
         h("div", { className: "player-zone" },
           h("div", { className: "zone-label" }, "Player"),
           h("div", { className: "hand-row" },
@@ -285,6 +277,204 @@ function App() {
   );
 }
 
+function SimulationPage({ navigate }) {
+  const [settings, setSettings] = useState({ num_decks: 6, das: true, s17: true, surrender: true });
+  const [simState, setSimState] = useState(null);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api("/api/sim/state")
+      .then(setSimState)
+      .catch((error) => setMessage(error.message));
+  }, []);
+
+  function setRule(key, value) {
+    setSettings((current) => ({ ...current, [key]: value }));
+  }
+
+  async function runAction(work) {
+    setBusy(true);
+    setMessage("");
+    try {
+      await work();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startGame() {
+    await runAction(async () => {
+      const payload = await api("/api/sim/start", settings);
+      setSimState(payload);
+    });
+  }
+
+  async function dealRound() {
+    await runAction(async () => {
+      const payload = await api("/api/sim/new-round", {});
+      setSimState(payload);
+    });
+  }
+
+  async function play(action) {
+    await runAction(async () => {
+      const payload = await api("/api/sim/action", { action });
+      setSimState(payload);
+    });
+  }
+
+  const recommendation = simState && simState.recommendation;
+  const activeHand = simState && simState.hands.find((hand) => hand.active);
+  const handLabel = activeHand ? handSummary(activeHand) : "No active hand";
+  const legalActions = simState ? simState.legal_actions : [];
+  const phase = simState ? simState.phase : "idle";
+
+  return h("div", { className: "app-shell sim-shell" },
+    h("aside", { className: "sidebar" },
+      h(BrandBlock, { subtitle: "Simulation", navigate }),
+      h(SettingsPanel, { settings, setRule, actionLabel: "Start Game", onAction: startGame, busy }),
+      h(CountPanel, { state: simState }),
+      h(StatsPanel, { stats: simState && simState.stats, shoeCards: simState && simState.shoe_cards_remaining }),
+      h(ObservedPanel, { cards: simState && simState.observed_cards })
+    ),
+    h("main", { className: "workspace" },
+      h(PageNav, { active: "simulation", navigate }),
+      message && h("div", { className: "message" }, message),
+      simState && h("div", { className: "sim-message" }, simState.message),
+      h("section", { className: "table sim-table" },
+        h("div", { className: "dealer-zone" },
+          h("div", { className: "zone-label" }, "Dealer"),
+          h("div", { className: "hand-row" },
+            simState && simState.dealer.cards.length
+              ? simState.dealer.cards.map((card, index) => h(DisplayCard, { card, key: `${card.label}-${index}` }))
+              : h(DisplayCard, { card: null })
+          ),
+          h("div", { className: "table-total" },
+            simState && simState.dealer.revealed ? `Dealer ${simState.dealer.total}` : "Dealer total hidden"
+          )
+        ),
+        h(RecommendationPanel, {
+          recommendation,
+          handLabel,
+          reasoning: recommendation ? recommendation.reasoning : "Deal a round to get a live recommendation",
+        }),
+        h("div", { className: "player-zone multi-hand-zone" },
+          h("div", { className: "zone-label" }, "Player"),
+          h("div", { className: "sim-hands" },
+            simState && simState.hands.length
+              ? simState.hands.map((hand) => h(SimHandView, { hand, key: hand.index }))
+              : h("span", { className: "empty-hand" }, "No round dealt")
+          )
+        )
+      ),
+      h("section", { className: "sim-controls" },
+        h("div", { className: "panel control-stack" },
+          h("div", { className: "panel-title" }, "Game"),
+          h("button", { className: "primary", onClick: dealRound, disabled: busy || phase === "player" }, "Deal Round"),
+          h("button", { className: "secondary", onClick: startGame, disabled: busy }, "Reset Shoe")
+        ),
+        h("div", { className: "panel action-panel" },
+          h("div", { className: "panel-title" }, "Player Action"),
+          h("div", { className: "play-actions" },
+            ["HIT", "STAND", "DOUBLE", "SPLIT", "SURRENDER"].map((action) => {
+              const recommended = recommendation && recommendation.action === action;
+              return h("button", {
+                key: action,
+                className: recommended ? `play-action recommended ${ACTION_CLASS[action] || ""}` : "play-action",
+                onClick: () => play(action),
+                disabled: busy || !legalActions.includes(action),
+              }, recommended ? `${action} *` : action);
+            })
+          )
+        ),
+        h("div", { className: "panel result-panel" },
+          h("div", { className: "panel-title" }, "Round Results"),
+          simState && simState.hands.length
+            ? simState.hands.map((hand) => h("div", { className: "result-row", key: `result-${hand.index}` },
+                h("span", null, `Hand ${hand.index + 1}`),
+                h("strong", null, hand.result ? `${hand.result} (${formatUnits(hand.payout)})` : hand.status)
+              ))
+            : h("span", { className: "muted" }, "No results")
+        )
+      )
+    )
+  );
+}
+
+function BrandBlock({ subtitle, navigate }) {
+  return h("div", { className: "brand-row" },
+    h("button", { className: "mark mark-button", onClick: () => navigate("home") }, "BJ"),
+    h("div", null,
+      h("h1", null, "Blackjack Advisor"),
+      h("p", null, subtitle)
+    )
+  );
+}
+
+function PageNav({ active, navigate }) {
+  return h("nav", { className: "page-nav" },
+    h("button", { className: "nav-button", onClick: () => navigate("home") }, "Home"),
+    h("button", {
+      className: active === "simulation" ? "nav-button active" : "nav-button",
+      onClick: () => navigate("simulation"),
+    }, "Simulation"),
+    h("button", {
+      className: active === "solver" ? "nav-button active" : "nav-button",
+      onClick: () => navigate("solver"),
+    }, "Solver")
+  );
+}
+
+function SettingsPanel({ settings, setRule, actionLabel, onAction, busy }) {
+  return h("section", { className: "panel" },
+    h("div", { className: "panel-title" }, "Shoe"),
+    h("label", { className: "field" },
+      h("span", null, "Decks"),
+      h("input", {
+        type: "number",
+        min: "1",
+        max: "8",
+        value: settings.num_decks,
+        onChange: (event) => setRule("num_decks", Number(event.target.value)),
+      })
+    ),
+    h(Toggle, {
+      label: "Double after split",
+      checked: settings.das,
+      onChange: (value) => setRule("das", value),
+    }),
+    h(Toggle, {
+      label: "Dealer stands S17",
+      checked: settings.s17,
+      onChange: (value) => setRule("s17", value),
+    }),
+    h(Toggle, {
+      label: "Late surrender",
+      checked: settings.surrender,
+      onChange: (value) => setRule("surrender", value),
+    }),
+    h("button", { className: "primary full", onClick: onAction, disabled: busy }, actionLabel)
+  );
+}
+
+function RecommendationPanel({ recommendation, handLabel, reasoning }) {
+  return h("div", { className: "recommendation" },
+    h("div", { className: "rec-label" }, "Recommendation"),
+    recommendation
+      ? h("div", { className: `rec-action ${ACTION_CLASS[recommendation.action] || ""}` }, recommendation.action)
+      : h("div", { className: "rec-action empty" }, "--"),
+    h("div", { className: "rec-meta" },
+      h("span", null, handLabel),
+      h("span", null, recommendation ? `Code ${recommendation.raw_code}` : "Code --"),
+      h("span", null, recommendation && recommendation.is_deviation ? "Deviation" : "Basic")
+    ),
+    h("div", { className: "reasoning" }, reasoning)
+  );
+}
+
 function CountPanel({ state }) {
   const count = state && state.count;
   return h("section", { className: "panel stat-panel" },
@@ -296,6 +486,33 @@ function CountPanel({ state }) {
       h(Stat, { label: "Seen", value: count ? count.cards_seen : 0 }),
       h(Stat, { label: "Aces", value: count ? count.aces_seen : 0 }),
       h(Stat, { label: "Pen", value: count ? `${formatNumber(count.deck_penetration * 100, 1)}%` : "0.0%" })
+    )
+  );
+}
+
+function StatsPanel({ stats, shoeCards }) {
+  return h("section", { className: "panel stat-panel" },
+    h("div", { className: "panel-title" }, "Stats"),
+    h("div", { className: "stat-grid" },
+      h(Stat, { label: "Rounds", value: stats ? stats.rounds : 0 }),
+      h(Stat, { label: "Hands", value: stats ? stats.hands : 0 }),
+      h(Stat, { label: "Wins", value: stats ? stats.wins : 0 }),
+      h(Stat, { label: "Losses", value: stats ? stats.losses : 0 }),
+      h(Stat, { label: "Pushes", value: stats ? stats.pushes : 0 }),
+      h(Stat, { label: "Units", value: stats ? formatUnits(stats.bankroll) : 0 }),
+      h(Stat, { label: "Blackjacks", value: stats ? stats.blackjacks : 0 }),
+      h(Stat, { label: "Shoe cards", value: shoeCards || 0 })
+    )
+  );
+}
+
+function ObservedPanel({ cards }) {
+  return h("section", { className: "panel observed-panel" },
+    h("div", { className: "panel-title" }, "Observed"),
+    h("div", { className: "observed-list" },
+      cards && cards.length
+        ? cards.map((card, index) => h("span", { className: "mini-card", key: `${card}-${index}` }, card))
+        : h("span", { className: "muted" }, "None")
     )
   );
 }
@@ -339,6 +556,39 @@ function CardSlot({ label, filled, onRemove }) {
   },
     h("span", null, label)
   );
+}
+
+function DisplayCard({ card }) {
+  if (!card) {
+    return h("div", { className: "display-card empty-card" }, h("span", null, "--"));
+  }
+  const red = card.suit === "h" || card.suit === "d";
+  return h("div", {
+    className: card.hidden ? "display-card hidden-card" : red ? "display-card red-card" : "display-card black-card",
+  }, h("span", null, card.label));
+}
+
+function SimHandView({ hand }) {
+  return h("div", { className: hand.active ? "sim-hand active" : "sim-hand" },
+    h("div", { className: "sim-hand-head" },
+      h("span", null, `Hand ${hand.index + 1}`),
+      h("strong", null, handSummary(hand))
+    ),
+    h("div", { className: "hand-row compact-row" },
+      hand.cards.map((card, index) => h(DisplayCard, { card, key: `${hand.index}-${index}` }))
+    ),
+    h("div", { className: "sim-hand-foot" },
+      h("span", null, `Bet ${formatUnits(hand.bet)}`),
+      h("span", null, hand.result ? `${hand.result} ${formatUnits(hand.payout)}` : hand.status)
+    )
+  );
+}
+
+function handSummary(hand) {
+  if (hand.is_blackjack) return "Blackjack";
+  if (hand.is_bust) return "Bust";
+  const mode = hand.is_soft ? "Soft" : "Hard";
+  return `${mode} ${hand.total}`;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(h(App));
