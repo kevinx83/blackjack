@@ -231,6 +231,8 @@ class SimHand:
 
 @dataclass
 class SimStats:
+    starting_units: float = 100.0
+    balance: float = 100.0
     rounds: int = 0
     hands: int = 0
     wins: int = 0
@@ -263,6 +265,9 @@ class BlackjackSimulation:
         decks = int(payload.get("num_decks", self.rules.num_decks))
         if decks < 1 or decks > 8:
             raise ValueError("Number of decks must be between 1 and 8")
+        starting_units = int(payload.get("starting_units", 100))
+        if starting_units < 1 or starting_units > 10000:
+            raise ValueError("Starting units must be between 1 and 10000")
 
         self.rules = TableRules(
             num_decks=decks,
@@ -276,7 +281,7 @@ class BlackjackSimulation:
             s17=self.rules.s17,
             surrender=self.rules.surrender,
         )
-        self.stats = SimStats()
+        self.stats = SimStats(starting_units=starting_units, balance=starting_units)
         self.observed_cards = []
         self.hands = []
         self.dealer_cards = []
@@ -308,6 +313,8 @@ class BlackjackSimulation:
         selected_bet = int((payload or {}).get("bet_units", 1))
         if selected_bet < 1 or selected_bet > 20:
             raise ValueError("Bet units must be between 1 and 20")
+        if selected_bet > self.stats.balance:
+            raise ValueError("Bet exceeds available units")
 
         self.hands = []
         self.dealer_cards = []
@@ -382,6 +389,8 @@ class BlackjackSimulation:
         elif action == "DOUBLE":
             if not self.can_double(hand):
                 raise ValueError("Double is only available on legal two-card hands")
+            if not self.can_add_bet(hand.bet):
+                raise ValueError("Not enough units to double")
             hand.bet *= 2
             hand.cards.append(self.draw_visible())
             hand.status = "bust" if hand.as_hand().is_bust else "stand"
@@ -398,6 +407,8 @@ class BlackjackSimulation:
         elif action == "SPLIT":
             if not self.can_split(hand):
                 raise ValueError("Split is only available for a legal pair")
+            if not self.can_add_bet(hand.bet):
+                raise ValueError("Not enough units to split")
             first_card, second_card = hand.cards
             split_aces = first_card.rank == "A" and second_card.rank == "A"
             self.hands[self.active_hand_index] = SimHand(
@@ -453,6 +464,12 @@ class BlackjackSimulation:
 
     def can_surrender(self, hand: SimHand) -> bool:
         return self.rules.surrender and hand.status == "active" and len(hand.cards) == 2 and not hand.from_split
+
+    def current_exposure(self) -> float:
+        return sum(hand.bet for hand in self.hands if hand.result is None)
+
+    def can_add_bet(self, amount: float) -> bool:
+        return self.current_exposure() + amount <= self.stats.balance
 
     def advance_turn(self) -> None:
         for index in range(self.active_hand_index, len(self.hands)):
@@ -513,6 +530,7 @@ class BlackjackSimulation:
         hand.payout = payout
         self.stats.hands += 1
         self.stats.bankroll += payout
+        self.stats.balance += payout
         if result in {"win", "blackjack"}:
             self.stats.wins += 1
         elif result == "loss":
@@ -622,6 +640,8 @@ class BlackjackSimulation:
                 "recommendation_hidden": self.phase != "round_over",
             },
             "stats": {
+                "starting_units": self.stats.starting_units,
+                "balance": self.stats.balance,
                 "rounds": self.stats.rounds,
                 "hands": self.stats.hands,
                 "wins": self.stats.wins,

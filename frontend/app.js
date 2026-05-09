@@ -91,6 +91,18 @@ function parseBetUnits(value) {
   return { valid: true, value: parsed, error: "" };
 }
 
+function parseStartingUnits(value) {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    return { valid: false, value: null, error: "Starting units must be a whole number." };
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (parsed < 1 || parsed > 10000) {
+    return { valid: false, value: parsed, error: "Starting units must be between 1 and 10000." };
+  }
+  return { valid: true, value: parsed, error: "" };
+}
+
 function App() {
   const [page, setPage] = useState("home");
 
@@ -134,6 +146,7 @@ function SolverPage({ navigate }) {
   const [player, setPlayer] = useState([]);
   const [extraCards, setExtraCards] = useState([]);
   const [roundCounted, setRoundCounted] = useState(false);
+  const [countedPlayerCount, setCountedPlayerCount] = useState(0);
   const [roundBetting, setRoundBetting] = useState(null);
   const [result, setResult] = useState(null);
   const [message, setMessage] = useState("");
@@ -149,6 +162,7 @@ function SolverPage({ navigate }) {
   const canDouble = player.length === 2;
   const canSplit = isPair(player);
   const playerStats = useMemo(() => handStats(player), [player]);
+  const pendingHitCards = roundCounted ? player.slice(countedPlayerCount) : [];
 
   const handLabel = useMemo(() => {
     if (!result) return player.length ? handTotalLabel(playerStats) : "No hand";
@@ -160,6 +174,15 @@ function SolverPage({ navigate }) {
 
   function setRule(key, value) {
     setSettings((current) => ({ ...current, [key]: value }));
+  }
+
+  function chooseDealer(rank) {
+    if (roundCounted) {
+      setMessage("Dealer upcard has already been counted. Start a new round to change it.");
+      return;
+    }
+    setDealer(rank);
+    setResult(null);
   }
 
   async function runAction(work) {
@@ -181,6 +204,7 @@ function SolverPage({ navigate }) {
     setResult(null);
     setRoundBetting(null);
     setRoundCounted(false);
+    setCountedPlayerCount(0);
     setMessage("");
   }
 
@@ -220,6 +244,25 @@ function SolverPage({ navigate }) {
       setRoundBetting(payload.pre_round_betting);
       setState(payload.state);
       setRoundCounted(true);
+      setCountedPlayerCount(player.length);
+    });
+  }
+
+  async function recordPendingHitCards() {
+    if (pendingHitCards.length === 0 || !dealer) return;
+    await runAction(async () => {
+      const nextState = await api("/api/observe", { cards: pendingHitCards });
+      setState(nextState);
+      setCountedPlayerCount(player.length);
+
+      const payload = await api("/api/recommend", {
+        dealer,
+        player,
+        can_double: false,
+        can_split: false,
+      });
+      setResult(payload);
+      setState(payload.state);
     });
   }
 
@@ -232,12 +275,33 @@ function SolverPage({ navigate }) {
     });
   }
 
-  function addPlayer(rank) {
+  async function startNewSolverRound() {
+    await runAction(async () => {
+      const cardsToCommit = [...pendingHitCards, ...extraCards];
+      if (cardsToCommit.length > 0) {
+        const nextState = await api("/api/observe", { cards: cardsToCommit });
+        setState(nextState);
+      }
+      clearRound();
+    });
+  }
+
+  async function addPlayer(rank) {
+    if (!roundCounted) {
+      setPlayer((cards) => [...cards, rank]);
+      setResult(null);
+      return;
+    }
     setPlayer((cards) => [...cards, rank]);
     setResult(null);
+    setMessage("Hit card staged. Record pending cards when you are ready to update the count.");
   }
 
   function removePlayer(index) {
+    if (roundCounted && index < countedPlayerCount) {
+      setMessage("Counted player cards cannot be removed. Start a new round to edit the initial hand.");
+      return;
+    }
     setPlayer((cards) => cards.filter((_, cardIndex) => cardIndex !== index));
     setResult(null);
   }
@@ -256,7 +320,11 @@ function SolverPage({ navigate }) {
       h("section", { className: "table" },
         h("div", { className: "dealer-zone" },
           h("div", { className: "zone-label" }, "Dealer"),
-          h(CardSlot, { label: dealer || "Upcard", filled: Boolean(dealer), onRemove: () => setDealer("") }),
+          h(CardSlot, {
+            label: dealer || "Upcard",
+            filled: Boolean(dealer),
+            onRemove: roundCounted ? undefined : () => setDealer(""),
+          }),
           h(TotalBadge, { label: "Upcard Value", value: dealer ? upcardTotalLabel(dealer) : "--" })
         ),
         h(RecommendationPanel, {
@@ -282,10 +350,10 @@ function SolverPage({ navigate }) {
       h("section", { className: "actions-grid" },
         h("div", { className: "panel" },
           h("div", { className: "panel-title" }, "Dealer Upcard"),
-          h(RankPad, { selected: dealer ? [dealer] : [], onPick: setDealer })
+          h(RankPad, { selected: dealer ? [dealer] : [], onPick: chooseDealer })
         ),
         h("div", { className: "panel" },
-          h("div", { className: "panel-title" }, "Player Hand"),
+          h("div", { className: "panel-title" }, roundCounted ? "Hit Card" : "Player Hand"),
           h(RankPad, { selected: player, onPick: addPlayer })
         ),
         h("div", { className: "panel control-stack" },
@@ -293,7 +361,7 @@ function SolverPage({ navigate }) {
           h("div", { className: "round-status" },
             h("span", null, `Double ${canDouble ? "available" : "locked"}`),
             h("span", null, `Split ${canSplit ? "available" : "locked"}`),
-            h("span", null, roundCounted ? "Visible cards counted" : "Visible cards pending")
+            h("span", null, roundCounted ? `${pendingHitCards.length} pending hit card(s)` : "Visible cards pending")
           ),
           h("button", {
             className: "primary",
@@ -302,10 +370,15 @@ function SolverPage({ navigate }) {
           }, "Count + Recommend"),
           h("button", {
             className: "secondary",
+            onClick: recordPendingHitCards,
+            disabled: busy || pendingHitCards.length === 0,
+          }, "Record Pending + Recommend"),
+          h("button", {
+            className: "secondary",
             onClick: recommendOnly,
             disabled: busy || !canRecommend,
           }, "Recommend Only"),
-          h("button", { className: "secondary", onClick: clearRound, disabled: busy }, "New Round")
+          h("button", { className: "secondary", onClick: startNewSolverRound, disabled: busy }, "New Round")
         ),
         h("div", { className: "panel" },
           h("div", { className: "panel-title" }, "Extra Cards"),
@@ -329,7 +402,7 @@ function SolverPage({ navigate }) {
 }
 
 function SimulationPage({ navigate }) {
-  const [settings, setSettings] = useState({ num_decks: 6, das: true, s17: true, surrender: true });
+  const [settings, setSettings] = useState({ num_decks: 6, das: true, s17: true, surrender: true, starting_units: "100" });
   const [simState, setSimState] = useState(null);
   const [playerBet, setPlayerBet] = useState("1");
   const [message, setMessage] = useState("");
@@ -359,6 +432,10 @@ function SimulationPage({ navigate }) {
 
   async function startGame() {
     await runAction(async () => {
+      const parsedStartingUnits = parseStartingUnits(settings.starting_units);
+      if (!parsedStartingUnits.valid) {
+        throw new Error(parsedStartingUnits.error);
+      }
       const payload = await api("/api/sim/start", settings);
       setSimState(payload);
     });
@@ -395,7 +472,7 @@ function SimulationPage({ navigate }) {
   return h("div", { className: "app-shell sim-shell" },
     h("aside", { className: "sidebar" },
       h(BrandBlock, { subtitle: "Simulation", navigate }),
-      h(SettingsPanel, { settings, setRule, actionLabel: "Start Game", onAction: startGame, busy }),
+      h(SettingsPanel, { settings, setRule, actionLabel: "Start Game", onAction: startGame, busy, showStartingUnits: true }),
       h(SimulationBetPanel, { simState, playerBet, setPlayerBet, phase, busy })
     ),
     h("main", { className: "workspace" },
@@ -546,7 +623,8 @@ function PageNav({ active, navigate }) {
   );
 }
 
-function SettingsPanel({ settings, setRule, actionLabel, onAction, busy }) {
+function SettingsPanel({ settings, setRule, actionLabel, onAction, busy, showStartingUnits = false }) {
+  const parsedStartingUnits = showStartingUnits ? parseStartingUnits(settings.starting_units) : null;
   return h("section", { className: "panel" },
     h("div", { className: "panel-title" }, "Shoe"),
     h("label", { className: "field" },
@@ -558,6 +636,18 @@ function SettingsPanel({ settings, setRule, actionLabel, onAction, busy }) {
         value: settings.num_decks,
         onChange: (event) => setRule("num_decks", Number(event.target.value)),
       })
+    ),
+    showStartingUnits && h("label", { className: "field" },
+      h("span", null, "Starting Units"),
+      h("input", {
+        type: "text",
+        inputMode: "numeric",
+        value: settings.starting_units,
+        onChange: (event) => setRule("starting_units", event.target.value),
+      }),
+      h("small", { className: parsedStartingUnits.valid ? "" : "field-error" },
+        parsedStartingUnits.valid ? "Bankroll for a new simulation." : parsedStartingUnits.error
+      )
     ),
     h(Toggle, {
       label: "Double after split",
@@ -673,12 +763,13 @@ function StatsPanel({ stats, shoeCards, compact = false }) {
   return h("section", { className: compact ? "panel stat-panel compact-panel" : "panel stat-panel" },
     h("div", { className: "panel-title" }, "Stats"),
     h("div", { className: "stat-grid" },
+      h(Stat, { label: "Balance", value: stats ? formatUnits(stats.balance) : 0 }),
+      h(Stat, { label: "Net", value: stats ? formatUnits(stats.bankroll) : 0 }),
       h(Stat, { label: "Rounds", value: stats ? stats.rounds : 0 }),
       h(Stat, { label: "Hands", value: stats ? stats.hands : 0 }),
       h(Stat, { label: "Wins", value: stats ? stats.wins : 0 }),
       h(Stat, { label: "Losses", value: stats ? stats.losses : 0 }),
       h(Stat, { label: "Pushes", value: stats ? stats.pushes : 0 }),
-      h(Stat, { label: "Units", value: stats ? formatUnits(stats.bankroll) : 0 }),
       h(Stat, { label: "Blackjacks", value: stats ? stats.blackjacks : 0 }),
       h(Stat, { label: "Shoe cards", value: shoeCards || 0 })
     )
