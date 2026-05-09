@@ -226,6 +226,45 @@ p {
   font-size: 20px;
 }
 
+.bet-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.bet-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bet-card.primary-bet {
+  border-color: rgba(214, 165, 64, 0.55);
+  background: #fff7df;
+}
+
+.bet-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.bet-card strong {
+  color: var(--ink);
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.bet-card em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .observed-list,
 .chip-row {
   display: flex;

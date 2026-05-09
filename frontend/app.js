@@ -116,6 +116,7 @@ function SolverPage({ navigate }) {
   const [player, setPlayer] = useState([]);
   const [extraCards, setExtraCards] = useState([]);
   const [roundCounted, setRoundCounted] = useState(false);
+  const [roundBetting, setRoundBetting] = useState(null);
   const [result, setResult] = useState(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -160,6 +161,7 @@ function SolverPage({ navigate }) {
     setPlayer([]);
     setExtraCards([]);
     setResult(null);
+    setRoundBetting(null);
     setRoundCounted(false);
     setMessage("");
   }
@@ -182,6 +184,7 @@ function SolverPage({ navigate }) {
         can_split: canSplit,
       });
       setResult(payload);
+      setRoundBetting(null);
       setState(payload.state);
     });
   }
@@ -189,17 +192,16 @@ function SolverPage({ navigate }) {
   async function countVisibleAndRecommend() {
     if (!canRecommend || roundCounted) return;
     await runAction(async () => {
-      const countedState = await api("/api/observe", { cards: [dealer, ...player] });
-      setState(countedState);
-      setRoundCounted(true);
-      const payload = await api("/api/recommend", {
+      const payload = await api("/api/count-recommend", {
         dealer,
         player,
         can_double: canDouble,
         can_split: canSplit,
       });
       setResult(payload);
+      setRoundBetting(payload.pre_round_betting);
       setState(payload.state);
+      setRoundCounted(true);
     });
   }
 
@@ -227,6 +229,7 @@ function SolverPage({ navigate }) {
       h(BrandBlock, { subtitle: "Solver", navigate }),
       h(SettingsPanel, { settings, setRule, actionLabel: "Start Shoe", onAction: startShoe, busy }),
       h(CountPanel, { state }),
+      h(BetPanel, { betting: state && state.betting, roundBetting, mode: "solver" }),
       h(ObservedPanel, { cards: state && state.observed_cards })
     ),
     h("main", { className: "workspace" },
@@ -367,6 +370,11 @@ function SimulationPage({ navigate }) {
       h(BrandBlock, { subtitle: "Simulation", navigate }),
       h(SettingsPanel, { settings, setRule, actionLabel: "Start Game", onAction: startGame, busy }),
       h(CountPanel, { state: simState }),
+      h(BetPanel, {
+        betting: simState && simState.betting && simState.betting.next_hand,
+        roundBetting: simState && simState.betting && simState.betting.round,
+        mode: "simulation",
+      }),
       h(StatsPanel, { stats: simState && simState.stats, shoeCards: simState && simState.shoe_cards_remaining }),
       h(ObservedPanel, { cards: simState && simState.observed_cards })
     ),
@@ -411,6 +419,14 @@ function SimulationPage({ navigate }) {
       h("section", { className: "sim-controls" },
         h("div", { className: "panel control-stack" },
           h("div", { className: "panel-title" }, "Game"),
+          h("div", { className: "round-status" },
+            h("span", null, simState && simState.betting && simState.betting.next_hand
+              ? `Next bet ${simState.betting.next_hand.recommended_units} units`
+              : "Next bet --"),
+            h("span", null, simState && simState.betting && simState.betting.round
+              ? `This round ${simState.betting.round.recommended_units} units`
+              : "This round --")
+          ),
           h("button", { className: "primary", onClick: dealRound, disabled: busy || phase === "player" }, "Deal Round"),
           h("button", { className: "secondary", onClick: startGame, disabled: busy }, "Reset Shoe")
         ),
@@ -526,6 +542,29 @@ function CountPanel({ state }) {
       h(Stat, { label: "Pen", value: count ? `${formatNumber(count.deck_penetration * 100, 1)}%` : "0.0%" })
     )
   );
+}
+
+function BetPanel({ betting, roundBetting, mode }) {
+  const current = betting || null;
+  const round = roundBetting || null;
+  return h("section", { className: "panel bet-panel" },
+    h("div", { className: "panel-title" }, "Bet Units"),
+    h("div", { className: "bet-card primary-bet" },
+      h("span", null, mode === "simulation" ? "Next Hand" : "Current Shoe"),
+      h("strong", null, current ? `${current.recommended_units} unit${current.recommended_units === 1 ? "" : "s"}` : "--"),
+      h("em", null, current ? `Pre-round TC ${formatSigned(current.true_count)}` : "Pre-round TC --")
+    ),
+    h("div", { className: "bet-card" },
+      h("span", null, "This Round"),
+      h("strong", null, round ? `${round.recommended_units} unit${round.recommended_units === 1 ? "" : "s"}` : "--"),
+      h("em", null, round ? `Locked before deal at TC ${formatSigned(round.true_count)}` : "Locks before cards are counted")
+    )
+  );
+}
+
+function formatSigned(value) {
+  const number = Number(value || 0);
+  return `${number >= 0 ? "+" : ""}${number.toFixed(2)}`;
 }
 
 function StatsPanel({ stats, shoeCards }) {

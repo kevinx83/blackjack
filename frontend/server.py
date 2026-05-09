@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from src.decision.engine import BlackjackAdvisor  # noqa: E402
+from src.decision.engine import BlackjackAdvisor, bet_units_for_true_count  # noqa: E402
 from src.decision.hand import Card, Hand, parse_card  # noqa: E402
 
 
@@ -79,6 +79,29 @@ def recommendation_payload(recommendation) -> dict:
         "true_count": recommendation.true_count,
         "bet_units": recommendation.bet_units,
         "reasoning": recommendation.reasoning,
+    }
+
+
+def count_payload(counter) -> dict:
+    return {
+        "running_count": counter.running_count,
+        "true_count": counter.true_count(),
+        "true_count_int": counter.true_count_int(),
+        "decks_remaining": counter.decks_remaining(),
+        "cards_seen": counter.cards_seen,
+        "aces_seen": counter.aces_seen,
+        "deck_penetration": counter.deck_penetration,
+        "ace_neutral_true_count": counter.ace_neutral_tc(),
+    }
+
+
+def betting_payload(counter) -> dict:
+    true_count = counter.true_count()
+    return {
+        "recommended_units": bet_units_for_true_count(true_count),
+        "true_count": true_count,
+        "running_count": counter.running_count,
+        "decks_remaining": counter.decks_remaining(),
     }
 
 
@@ -148,14 +171,7 @@ class GameSession:
         )
 
         return {
-            "recommendation": {
-                "action": recommendation.action,
-                "raw_code": recommendation.raw_code,
-                "is_deviation": recommendation.is_deviation,
-                "true_count": recommendation.true_count,
-                "bet_units": recommendation.bet_units,
-                "reasoning": recommendation.reasoning,
-            },
+            "recommendation": recommendation_payload(recommendation),
             "hand": {
                 "cards": [card_label(card) for card in player_cards],
                 "total": hand.total,
@@ -168,6 +184,20 @@ class GameSession:
             "state": self.state(),
         }
 
+    def count_and_recommend(self, payload: dict) -> dict:
+        pre_round_betting = betting_payload(self.advisor.counter)
+        player_tokens = split_cards(payload.get("player"))
+        dealer_tokens = split_cards(payload.get("dealer"))
+        if not player_tokens:
+            raise ValueError("Player hand is required")
+        if len(dealer_tokens) != 1:
+            raise ValueError("Exactly one dealer upcard is required")
+
+        self.observe([dealer_tokens[0], *player_tokens])
+        result = self.recommend(payload)
+        result["pre_round_betting"] = pre_round_betting
+        return result
+
     def state(self) -> dict:
         counter = self.advisor.counter
         return {
@@ -177,16 +207,8 @@ class GameSession:
                 "s17": self.rules.s17,
                 "surrender": self.rules.surrender,
             },
-            "count": {
-                "running_count": counter.running_count,
-                "true_count": counter.true_count(),
-                "true_count_int": counter.true_count_int(),
-                "decks_remaining": counter.decks_remaining(),
-                "cards_seen": counter.cards_seen,
-                "aces_seen": counter.aces_seen,
-                "deck_penetration": counter.deck_penetration,
-                "ace_neutral_true_count": counter.ace_neutral_tc(),
-            },
+            "count": count_payload(counter),
+            "betting": betting_payload(counter),
             "observed_cards": self.observed_cards[-40:],
         }
 
@@ -232,6 +254,7 @@ class BlackjackSimulation:
         self.message = "Start a game to deal the first round."
         self.observed_cards: list[str] = []
         self.stats = SimStats()
+        self.round_betting: dict | None = None
         self.shuffle_shoe()
 
     def start(self, payload: dict) -> dict:
@@ -258,6 +281,7 @@ class BlackjackSimulation:
         self.dealer_revealed = False
         self.phase = "idle"
         self.message = "New simulated shoe started."
+        self.round_betting = None
         self.shuffle_shoe()
         return self.state()
 
@@ -283,11 +307,13 @@ class BlackjackSimulation:
         self.active_hand_index = 0
         self.phase = "player"
         self.stats.rounds += 1
+        self.round_betting = betting_payload(self.advisor.counter)
+        round_units = self.round_betting["recommended_units"]
 
         player_cards = [self.draw_visible(), self.draw_visible()]
         dealer_upcard = self.draw_visible()
         dealer_hole = self.draw_hidden()
-        self.hands = [SimHand(player_cards)]
+        self.hands = [SimHand(player_cards, bet=round_units)]
         self.dealer_cards = [dealer_upcard, dealer_hole]
 
         player_hand = self.hands[0].as_hand()
@@ -552,15 +578,10 @@ class BlackjackSimulation:
             "active_hand_index": self.active_hand_index,
             "recommendation": self.active_recommendation(),
             "legal_actions": self.legal_actions(),
-            "count": {
-                "running_count": counter.running_count,
-                "true_count": counter.true_count(),
-                "true_count_int": counter.true_count_int(),
-                "decks_remaining": counter.decks_remaining(),
-                "cards_seen": counter.cards_seen,
-                "aces_seen": counter.aces_seen,
-                "deck_penetration": counter.deck_penetration,
-                "ace_neutral_true_count": counter.ace_neutral_tc(),
+            "count": count_payload(counter),
+            "betting": {
+                "next_hand": betting_payload(counter),
+                "round": self.round_betting,
             },
             "stats": {
                 "rounds": self.stats.rounds,
@@ -617,6 +638,8 @@ class BlackjackRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(SESSION.observe(split_cards(payload.get("cards"))))
             elif route == "/api/recommend":
                 self.send_json(SESSION.recommend(payload))
+            elif route == "/api/count-recommend":
+                self.send_json(SESSION.count_and_recommend(payload))
             elif route == "/api/sim/start":
                 self.send_json(SIMULATION.start(payload))
             elif route == "/api/sim/new-round":
