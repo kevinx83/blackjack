@@ -132,6 +132,16 @@ p {
   color: var(--ink);
 }
 
+.field small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.field small.field-error {
+  color: var(--red);
+}
+
 .toggle {
   display: flex;
   align-items: center;
@@ -226,6 +236,34 @@ p {
   font-size: 20px;
 }
 
+.sim-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 16px;
+}
+
+.dashboard-main {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 16px;
+}
+
+.compact-panel {
+  align-content: start;
+}
+
+.compact-stat-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.compact-panel .stat {
+  padding: 8px 10px;
+}
+
+.compact-panel .stat strong {
+  font-size: 18px;
+}
+
 .bet-panel {
   display: grid;
   gap: 10px;
@@ -270,6 +308,11 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.sim-dashboard .observed-list {
+  max-height: 116px;
+  overflow: auto;
 }
 
 .mini-card,
@@ -864,6 +907,11 @@ p {
   }
 
   .sim-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .sim-dashboard,
+  .dashboard-main {
     grid-template-columns: 1fr;
   }
 

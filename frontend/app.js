@@ -73,6 +73,24 @@ function upcardTotalLabel(rank) {
   return String(rankValue(rank));
 }
 
+function normalizeBetUnits(value) {
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.min(20, parsed));
+}
+
+function parseBetUnits(value) {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    return { valid: false, value: null, error: "Bet must be a whole number from 1 to 20 units." };
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (parsed < 1 || parsed > 20) {
+    return { valid: false, value: parsed, error: "Bet must be between 1 and 20 units." };
+  }
+  return { valid: true, value: parsed, error: "" };
+}
+
 function App() {
   const [page, setPage] = useState("home");
 
@@ -313,7 +331,7 @@ function SolverPage({ navigate }) {
 function SimulationPage({ navigate }) {
   const [settings, setSettings] = useState({ num_decks: 6, das: true, s17: true, surrender: true });
   const [simState, setSimState] = useState(null);
-  const [playerBet, setPlayerBet] = useState(1);
+  const [playerBet, setPlayerBet] = useState("1");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -348,7 +366,12 @@ function SimulationPage({ navigate }) {
 
   async function dealRound() {
     await runAction(async () => {
-      const payload = await api("/api/sim/new-round", { bet_units: playerBet });
+      const parsedBet = parseBetUnits(playerBet);
+      if (!parsedBet.valid) {
+        throw new Error(parsedBet.error);
+      }
+      const betUnits = parsedBet.value;
+      const payload = await api("/api/sim/new-round", { bet_units: betUnits });
       setSimState(payload);
     });
   }
@@ -367,15 +390,13 @@ function SimulationPage({ navigate }) {
   const decisionLog = simState && simState.decision_log ? simState.decision_log : [];
   const lastDecision = phase === "round_over" && decisionLog.length ? decisionLog[decisionLog.length - 1] : null;
   const revealedRecommendation = lastDecision ? lastDecision.recommendation : null;
+  const selectedBet = parseBetUnits(playerBet);
 
   return h("div", { className: "app-shell sim-shell" },
     h("aside", { className: "sidebar" },
       h(BrandBlock, { subtitle: "Simulation", navigate }),
       h(SettingsPanel, { settings, setRule, actionLabel: "Start Game", onAction: startGame, busy }),
-      h(CountPanel, { state: simState }),
-      h(SimulationBetPanel, { simState, playerBet, setPlayerBet, phase, busy }),
-      h(StatsPanel, { stats: simState && simState.stats, shoeCards: simState && simState.shoe_cards_remaining }),
-      h(ObservedPanel, { cards: simState && simState.observed_cards })
+      h(SimulationBetPanel, { simState, playerBet, setPlayerBet, phase, busy })
     ),
     h("main", { className: "workspace" },
       h(PageNav, { active: "simulation", navigate }),
@@ -424,7 +445,9 @@ function SimulationPage({ navigate }) {
         h("div", { className: "panel control-stack" },
           h("div", { className: "panel-title" }, "Game"),
           h("div", { className: "round-status" },
-            h("span", null, `Selected bet ${playerBet} unit${playerBet === 1 ? "" : "s"}`),
+            h("span", null, selectedBet.valid
+              ? `Selected bet ${selectedBet.value} unit${selectedBet.value === 1 ? "" : "s"}`
+              : "Selected bet invalid"),
             h("span", null, simState && simState.betting && simState.betting.round
               ? `Recommended ${simState.betting.round.recommended_units} units`
               : simState && simState.betting && simState.betting.player_round_units
@@ -457,8 +480,19 @@ function SimulationPage({ navigate }) {
             : h("span", { className: "muted" }, "No results")
         ),
         h(DecisionReviewPanel, { decisions: decisionLog, phase })
-      )
+      ),
+      h(SimulationDashboard, { simState })
     )
+  );
+}
+
+function SimulationDashboard({ simState }) {
+  return h("section", { className: "sim-dashboard" },
+    h("div", { className: "dashboard-main" },
+      h(CountPanel, { state: simState, compact: true }),
+      h(StatsPanel, { stats: simState && simState.stats, shoeCards: simState && simState.shoe_cards_remaining, compact: true })
+    ),
+    h(ObservedPanel, { cards: simState && simState.observed_cards, compact: true })
   );
 }
 
@@ -561,11 +595,11 @@ function RecommendationPanel({ recommendation, handLabel, reasoning, hidden = fa
   );
 }
 
-function CountPanel({ state }) {
+function CountPanel({ state, compact = false }) {
   const count = state && state.count;
-  return h("section", { className: "panel stat-panel" },
+  return h("section", { className: compact ? "panel stat-panel compact-panel" : "panel stat-panel" },
     h("div", { className: "panel-title" }, "Count"),
-    h("div", { className: "stat-grid" },
+    h("div", { className: compact ? "stat-grid compact-stat-grid" : "stat-grid" },
       h(Stat, { label: "Running", value: count ? count.running_count : 0 }),
       h(Stat, { label: "True", value: count ? formatNumber(count.true_count, 2) : "0.00" }),
       h(Stat, { label: "Decks left", value: count ? formatNumber(count.decks_remaining, 2) : "0.00" }),
@@ -598,24 +632,22 @@ function SimulationBetPanel({ simState, playerBet, setPlayerBet, phase, busy }) 
   const roundRecommendation = betting && betting.round;
   const roundPlayerBet = betting && betting.player_round_units;
   const locked = phase === "player";
-
-  function updateBet(value) {
-    const next = Math.max(1, Math.min(20, Number(value) || 1));
-    setPlayerBet(next);
-  }
+  const parsedBet = parseBetUnits(playerBet);
 
   return h("section", { className: "panel bet-panel" },
     h("div", { className: "panel-title" }, "Bet Practice"),
     h("label", { className: "field bet-field" },
       h("span", null, "Your Next Bet"),
       h("input", {
-        type: "number",
-        min: "1",
-        max: "20",
+        type: "text",
+        inputMode: "numeric",
         value: playerBet,
         disabled: busy || locked,
-        onChange: (event) => updateBet(event.target.value),
-      })
+        onChange: (event) => setPlayerBet(event.target.value),
+      }),
+      h("small", { className: parsedBet.valid ? "" : "field-error" },
+        parsedBet.valid ? "Allowed range: 1-20 units" : parsedBet.error
+      )
     ),
     h("div", { className: "bet-card primary-bet" },
       h("span", null, "This Round"),
@@ -637,8 +669,8 @@ function formatSigned(value) {
   return `${number >= 0 ? "+" : ""}${number.toFixed(2)}`;
 }
 
-function StatsPanel({ stats, shoeCards }) {
-  return h("section", { className: "panel stat-panel" },
+function StatsPanel({ stats, shoeCards, compact = false }) {
+  return h("section", { className: compact ? "panel stat-panel compact-panel" : "panel stat-panel" },
     h("div", { className: "panel-title" }, "Stats"),
     h("div", { className: "stat-grid" },
       h(Stat, { label: "Rounds", value: stats ? stats.rounds : 0 }),
@@ -653,8 +685,8 @@ function StatsPanel({ stats, shoeCards }) {
   );
 }
 
-function ObservedPanel({ cards }) {
-  return h("section", { className: "panel observed-panel" },
+function ObservedPanel({ cards, compact = false }) {
+  return h("section", { className: compact ? "panel observed-panel compact-panel" : "panel observed-panel" },
     h("div", { className: "panel-title" }, "Observed"),
     h("div", { className: "observed-list" },
       cards && cards.length
