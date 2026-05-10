@@ -73,6 +73,11 @@ def _resolve(
 
 
 def _bet_units(tc: float) -> int:
+    return bet_units_for_true_count(tc)
+
+
+def bet_units_for_true_count(tc: float) -> int:
+    """Map a pre-round true count to a suggested bet size in units."""
     for threshold, units in _BET_RAMP:
         if tc >= threshold:
             return units
