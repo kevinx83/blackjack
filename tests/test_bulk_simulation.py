@@ -16,3 +16,9 @@ def test_bulk_strategy_simulation_runs_requested_rounds():
 def test_bulk_strategy_simulation_rejects_too_many_hands():
     with pytest.raises(ValueError, match="Hands must be between"):
         run_bulk_strategy_simulation({"hands": 1_000_001})
+
+
+def test_bulk_strategy_simulation_reshuffles_before_exhaustion():
+    result = run_bulk_strategy_simulation({"hands": 100, "num_decks": 1, "seed": 123})
+
+    assert result["shoes"] > 10

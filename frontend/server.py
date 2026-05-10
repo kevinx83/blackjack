@@ -706,6 +706,7 @@ class BulkStrategySimulation:
         self.hands: list[SimHand] = []
         self.dealer_cards: list[Card] = []
         self.dealer_revealed = False
+        self.shuffle_at_cards_seen = 0
         self.stats = BulkStats()
         self.shuffle_shoe()
 
@@ -717,7 +718,17 @@ class BulkStrategySimulation:
             for rank in RANK_ORDER
         ]
         self.rng.shuffle(self.shoe)
+        shoe_cards = self.rules.num_decks * 52
+        self.shuffle_at_cards_seen = self.rng.randint(
+            int(shoe_cards * 0.50),
+            int(shoe_cards * 0.75),
+        )
         self.stats.shoes += 1
+
+    def should_shuffle_before_round(self) -> bool:
+        shoe_cards = self.rules.num_decks * 52
+        cards_seen_in_shoe = shoe_cards - len(self.shoe)
+        return cards_seen_in_shoe >= self.shuffle_at_cards_seen or len(self.shoe) < 16
 
     def run(self, rounds: int) -> BulkStats:
         for _ in range(rounds):
@@ -725,7 +736,7 @@ class BulkStrategySimulation:
         return self.stats
 
     def play_round(self) -> None:
-        if len(self.shoe) < 16:
+        if self.should_shuffle_before_round():
             self.shuffle_shoe()
             self.advisor.new_shoe()
 
