@@ -1083,9 +1083,10 @@ function DisplayCard({ card }) {
 }
 
 function SimHandView({ hand }) {
+  const handLabel = hand.from_split ? `Split ${hand.index + 1}` : `Hand ${hand.index + 1}`;
   return h("div", { className: hand.active ? "sim-hand active" : "sim-hand" },
     h("div", { className: "sim-hand-head" },
-      h("span", null, `Hand ${hand.index + 1}`),
+      h("span", null, handLabel),
       h("strong", null, handSummary(hand))
     ),
     h("div", { className: "hand-row compact-row" },

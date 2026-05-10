@@ -426,7 +426,7 @@ class BlackjackSimulation:
                     status="stand" if split_aces else "active",
                 ),
             )
-            self.message = "Split aces receive one card each." if split_aces else "Hand split."
+            self.message = "Split aces receive one card each." if split_aces else "Hand split. Play each hand in order."
             if split_aces:
                 self.advance_turn()
         else:
@@ -596,6 +596,7 @@ class BlackjackSimulation:
             "status": hand.status,
             "result": hand.result,
             "payout": hand.payout,
+            "from_split": hand.from_split,
             "active": self.phase == "player" and index == self.active_hand_index and hand.status == "active",
         }
 
