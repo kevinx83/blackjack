@@ -25,6 +25,7 @@ def main() -> None:
         epochs=args.epochs,
         batch=args.batch,
         imgsz=args.imgsz,
+        device='mps',
         project='runs/train',
         name='cards',
         exist_ok=True,
