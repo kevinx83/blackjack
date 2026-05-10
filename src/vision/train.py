@@ -3,7 +3,7 @@ Train YOLOv8n on the playing cards dataset.
 
 Usage:
     python train.py
-    python train.py --epochs 50 --batch 8
+    python train.py --epochs 50 --batch 16 --imgsz 320
 
 Weights are saved to runs/train/cards/weights/best.pt
 """
@@ -14,7 +14,7 @@ from ultralytics import YOLO
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch', type=int, default=16)
     parser.add_argument('--imgsz', type=int, default=640)
     args = parser.parse_args()
@@ -26,6 +26,8 @@ def main() -> None:
         batch=args.batch,
         imgsz=args.imgsz,
         device='mps',
+        half=True,
+        cache='ram',
         project='runs/train',
         name='cards',
         exist_ok=True,
