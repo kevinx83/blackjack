@@ -673,6 +673,299 @@ class BlackjackSimulation:
 SIMULATION = BlackjackSimulation()
 
 
+@dataclass
+class BulkStats:
+    rounds: int = 0
+    hands: int = 0
+    wins: int = 0
+    losses: int = 0
+    pushes: int = 0
+    blackjacks: int = 0
+    surrendered: int = 0
+    net_units: float = 0.0
+    total_wagered_units: float = 0.0
+    max_bankroll_units: float = 0.0
+    min_bankroll_units: float = 0.0
+    shoes: int = 0
+    decisions: int = 0
+
+
+class BulkStrategySimulation:
+    """Headless simulator that always follows BlackjackAdvisor recommendations."""
+
+    def __init__(self, rules: TableRules, seed: int | None = None) -> None:
+        self.rules = rules
+        self.rng = random.Random(seed)
+        self.advisor = BlackjackAdvisor(
+            num_decks=rules.num_decks,
+            das=rules.das,
+            s17=rules.s17,
+            surrender=rules.surrender,
+        )
+        self.shoe: list[Card] = []
+        self.hands: list[SimHand] = []
+        self.dealer_cards: list[Card] = []
+        self.dealer_revealed = False
+        self.stats = BulkStats()
+        self.shuffle_shoe()
+
+    def shuffle_shoe(self) -> None:
+        self.shoe = [
+            Card(rank, suit)
+            for _ in range(self.rules.num_decks)
+            for suit in SUIT_ORDER
+            for rank in RANK_ORDER
+        ]
+        self.rng.shuffle(self.shoe)
+        self.stats.shoes += 1
+
+    def run(self, rounds: int) -> BulkStats:
+        for _ in range(rounds):
+            self.play_round()
+        return self.stats
+
+    def play_round(self) -> None:
+        if len(self.shoe) < 16:
+            self.shuffle_shoe()
+            self.advisor.new_shoe()
+
+        self.stats.rounds += 1
+        selected_bet = float(bet_units_for_true_count(self.advisor.counter.true_count()))
+        self.stats.total_wagered_units += selected_bet
+        self.hands = []
+        self.dealer_cards = []
+        self.dealer_revealed = False
+
+        player_cards = [self.draw_visible(), self.draw_visible()]
+        dealer_upcard = self.draw_visible()
+        dealer_hole = self.draw_hidden()
+        self.hands = [SimHand(player_cards, bet=selected_bet)]
+        self.dealer_cards = [dealer_upcard, dealer_hole]
+
+        player_hand = self.hands[0].as_hand()
+        dealer_hand = Hand(self.dealer_cards)
+        if dealer_hand.is_blackjack or player_hand.is_blackjack:
+            self.reveal_dealer()
+            if dealer_hand.is_blackjack and player_hand.is_blackjack:
+                self.finish_hand(self.hands[0], "push", 0.0)
+            elif player_hand.is_blackjack:
+                self.finish_hand(self.hands[0], "blackjack", self.hands[0].bet * 1.5)
+                self.stats.blackjacks += 1
+            else:
+                self.finish_hand(self.hands[0], "loss", -self.hands[0].bet)
+            return
+
+        self.play_player_hands()
+        playable = [
+            hand
+            for hand in self.hands
+            if hand.status in {"stand", "active"} and not hand.as_hand().is_bust
+        ]
+        if playable:
+            self.play_dealer()
+        else:
+            for hand in self.hands:
+                if hand.status == "bust":
+                    self.finish_hand(hand, "loss", -hand.bet)
+
+    def play_player_hands(self) -> None:
+        index = 0
+        while index < len(self.hands):
+            hand = self.hands[index]
+            if hand.status != "active":
+                index += 1
+                continue
+
+            original_surrender = self.advisor.surrender
+            self.advisor.surrender = self.can_surrender(hand)
+            try:
+                recommendation = self.advisor.recommend(
+                    hand.as_hand(),
+                    self.dealer_cards[0],
+                    can_double=self.can_double(hand),
+                    can_split=self.can_split(hand),
+                )
+            finally:
+                self.advisor.surrender = original_surrender
+
+            self.stats.decisions += 1
+            action = recommendation.action
+            if action == "HIT":
+                hand.cards.append(self.draw_visible())
+                current = hand.as_hand()
+                if current.is_bust:
+                    hand.status = "bust"
+                    index += 1
+                elif current.total == 21:
+                    hand.status = "stand"
+                    index += 1
+            elif action == "STAND":
+                hand.status = "stand"
+                index += 1
+            elif action == "DOUBLE":
+                hand.bet *= 2
+                self.stats.total_wagered_units += hand.bet / 2
+                hand.cards.append(self.draw_visible())
+                hand.status = "bust" if hand.as_hand().is_bust else "stand"
+                index += 1
+            elif action == "SURRENDER":
+                hand.status = "surrender"
+                self.finish_hand(hand, "surrender", -hand.bet / 2)
+                self.stats.surrendered += 1
+                index += 1
+            elif action == "SPLIT":
+                first_card, second_card = hand.cards
+                split_aces = first_card.rank == "A" and second_card.rank == "A"
+                self.stats.total_wagered_units += hand.bet
+                self.hands[index] = SimHand(
+                    [first_card, self.draw_visible()],
+                    bet=hand.bet,
+                    from_split=True,
+                    status="stand" if split_aces else "active",
+                )
+                self.hands.insert(
+                    index + 1,
+                    SimHand(
+                        [second_card, self.draw_visible()],
+                        bet=hand.bet,
+                        from_split=True,
+                        status="stand" if split_aces else "active",
+                    ),
+                )
+                if split_aces:
+                    index += 2
+            else:
+                hand.status = "stand"
+                index += 1
+
+    def draw_visible(self) -> Card:
+        card = self.draw_hidden()
+        self.advisor.observe(card)
+        return card
+
+    def draw_hidden(self) -> Card:
+        if not self.shoe:
+            self.shuffle_shoe()
+            self.advisor.new_shoe()
+        return self.shoe.pop()
+
+    def reveal_dealer(self) -> None:
+        if self.dealer_revealed:
+            return
+        if len(self.dealer_cards) > 1:
+            self.advisor.observe(self.dealer_cards[1])
+        self.dealer_revealed = True
+
+    def can_double(self, hand: SimHand) -> bool:
+        return hand.status == "active" and len(hand.cards) == 2 and (not hand.from_split or self.rules.das)
+
+    def can_split(self, hand: SimHand) -> bool:
+        return hand.status == "active" and len(hand.cards) == 2 and hand.as_hand().is_pair and not hand.from_split
+
+    def can_surrender(self, hand: SimHand) -> bool:
+        return self.rules.surrender and hand.status == "active" and len(hand.cards) == 2 and not hand.from_split
+
+    def play_dealer(self) -> None:
+        self.reveal_dealer()
+        while self.dealer_should_hit():
+            self.dealer_cards.append(self.draw_visible())
+        self.settle_round()
+
+    def dealer_should_hit(self) -> bool:
+        dealer = Hand(self.dealer_cards)
+        return dealer.total < 17 or (dealer.total == 17 and dealer.is_soft and not self.rules.s17)
+
+    def settle_round(self) -> None:
+        dealer = Hand(self.dealer_cards)
+        dealer_bust = dealer.is_bust
+        dealer_total = dealer.total
+
+        for hand in self.hands:
+            player = hand.as_hand()
+            if hand.result is not None:
+                continue
+            if player.is_bust:
+                self.finish_hand(hand, "loss", -hand.bet)
+            elif dealer_bust:
+                self.finish_hand(hand, "win", hand.bet)
+            elif player.total > dealer_total:
+                self.finish_hand(hand, "win", hand.bet)
+            elif player.total < dealer_total:
+                self.finish_hand(hand, "loss", -hand.bet)
+            else:
+                self.finish_hand(hand, "push", 0.0)
+
+    def finish_hand(self, hand: SimHand, result: str, payout: float) -> None:
+        hand.status = "done"
+        hand.result = result
+        hand.payout = payout
+        self.stats.hands += 1
+        self.stats.net_units += payout
+        self.stats.max_bankroll_units = max(self.stats.max_bankroll_units, self.stats.net_units)
+        self.stats.min_bankroll_units = min(self.stats.min_bankroll_units, self.stats.net_units)
+        if result in {"win", "blackjack"}:
+            self.stats.wins += 1
+        elif result == "loss":
+            self.stats.losses += 1
+        elif result == "push":
+            self.stats.pushes += 1
+        elif result == "surrender":
+            self.stats.losses += 1
+
+
+def run_bulk_strategy_simulation(payload: dict) -> dict:
+    rounds = int(payload.get("hands", payload.get("rounds", 100000)))
+    if rounds < 1 or rounds > 1_000_000:
+        raise ValueError("Hands must be between 1 and 1,000,000")
+
+    decks = int(payload.get("num_decks", 6))
+    if decks < 1 or decks > 8:
+        raise ValueError("Number of decks must be between 1 and 8")
+
+    unit_value = float(payload.get("unit_value", 1))
+    if unit_value <= 0 or unit_value > 1_000_000:
+        raise ValueError("Unit value must be greater than 0")
+
+    raw_seed = payload.get("seed")
+    seed = int(raw_seed) if raw_seed not in (None, "") else None
+    rules = TableRules(
+        num_decks=decks,
+        das=bool(payload.get("das", True)),
+        s17=bool(payload.get("s17", True)),
+        surrender=bool(payload.get("surrender", True)),
+    )
+    simulator = BulkStrategySimulation(rules, seed=seed)
+    stats = simulator.run(rounds)
+    net_money = stats.net_units * unit_value
+    return {
+        "rules": {
+            "num_decks": rules.num_decks,
+            "das": rules.das,
+            "s17": rules.s17,
+            "surrender": rules.surrender,
+        },
+        "requested_hands": rounds,
+        "rounds": stats.rounds,
+        "hands_played": stats.hands,
+        "decisions": stats.decisions,
+        "wins": stats.wins,
+        "losses": stats.losses,
+        "pushes": stats.pushes,
+        "blackjacks": stats.blackjacks,
+        "surrendered": stats.surrendered,
+        "shoes": stats.shoes,
+        "net_units": stats.net_units,
+        "net_money": net_money,
+        "unit_value": unit_value,
+        "total_wagered_units": stats.total_wagered_units,
+        "max_bankroll_units": stats.max_bankroll_units,
+        "min_bankroll_units": stats.min_bankroll_units,
+        "win_rate": stats.wins / stats.hands if stats.hands else 0,
+        "loss_rate": stats.losses / stats.hands if stats.hands else 0,
+        "push_rate": stats.pushes / stats.hands if stats.hands else 0,
+    }
+
+
 class BlackjackRequestHandler(BaseHTTPRequestHandler):
     server_version = "BlackjackMVP/0.1"
 
@@ -704,6 +997,8 @@ class BlackjackRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(SIMULATION.new_round(payload))
             elif route == "/api/sim/action":
                 self.send_json(SIMULATION.player_action(payload))
+            elif route == "/api/bulk/run":
+                self.send_json(run_bulk_strategy_simulation(payload))
             else:
                 self.send_error(HTTPStatus.NOT_FOUND, "Unknown API route")
         except ValueError as exc:
