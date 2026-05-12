@@ -321,6 +321,53 @@ p {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.bulk-runs-panel {
+  grid-column: 1 / -1;
+}
+
+.bulk-run-table {
+  display: grid;
+  gap: 6px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.bulk-run-row {
+  display: grid;
+  grid-template-columns: 70px repeat(4, minmax(92px, 1fr));
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.bulk-run-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-strong);
+  color: var(--ink);
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.bulk-run-row strong {
+  color: var(--ink);
+}
+
+.bulk-run-row.positive strong {
+  color: #1f7c49;
+}
+
+.bulk-run-row.negative strong {
+  color: var(--red);
+}
+
 .dashboard-main {
   display: grid;
   grid-template-columns: 1fr 1.25fr;
