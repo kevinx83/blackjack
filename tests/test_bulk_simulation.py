@@ -11,6 +11,8 @@ def test_bulk_strategy_simulation_runs_requested_rounds():
     assert result["hands_played"] >= 50
     assert result["net_money"] == result["net_units"] * 5
     assert result["total_wagered_units"] >= 50
+    assert "insurance_bets" in result
+    assert "insurance_wins" in result
 
 
 def test_bulk_strategy_simulation_rejects_too_many_hands():

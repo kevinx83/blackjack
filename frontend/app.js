@@ -791,6 +791,7 @@ function BulkResultDashboard({ result, unitValue }) {
         h(Stat, { label: "Pushes", value: formatLargeNumber(result.pushes) }),
         h(Stat, { label: "Blackjacks", value: formatLargeNumber(result.blackjacks) }),
         h(Stat, { label: "Surrenders", value: formatLargeNumber(result.surrendered) }),
+        h(Stat, { label: "Insurance", value: formatLargeNumber(result.insurance_bets) }),
         h(Stat, { label: "Win Rate", value: `${formatNumber(result.win_rate * 100, 1)}%` })
       )
     ),

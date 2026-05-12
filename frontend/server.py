@@ -689,6 +689,8 @@ class BulkStats:
     min_bankroll_units: float = 0.0
     shoes: int = 0
     decisions: int = 0
+    insurance_bets: int = 0
+    insurance_wins: int = 0
 
 
 class BulkStrategySimulation:
@@ -756,6 +758,7 @@ class BulkStrategySimulation:
 
         player_hand = self.hands[0].as_hand()
         dealer_hand = Hand(self.dealer_cards)
+        self.resolve_insurance_if_advised(selected_bet, dealer_hand)
         if dealer_hand.is_blackjack or player_hand.is_blackjack:
             self.reveal_dealer()
             if dealer_hand.is_blackjack and player_hand.is_blackjack:
@@ -779,6 +782,19 @@ class BulkStrategySimulation:
             for hand in self.hands:
                 if hand.status == "bust":
                     self.finish_hand(hand, "loss", -hand.bet)
+
+    def resolve_insurance_if_advised(self, original_bet: float, dealer_hand: Hand) -> None:
+        if self.dealer_cards[0].rank != "A" or not self.advisor.insurance_advised():
+            return
+
+        insurance_bet = original_bet / 2
+        self.stats.insurance_bets += 1
+        self.stats.total_wagered_units += insurance_bet
+        if dealer_hand.is_blackjack:
+            self.stats.insurance_wins += 1
+            self.record_payout(insurance_bet * 2)
+        else:
+            self.record_payout(-insurance_bet)
 
     def play_player_hands(self) -> None:
         index = 0
@@ -912,9 +928,7 @@ class BulkStrategySimulation:
         hand.result = result
         hand.payout = payout
         self.stats.hands += 1
-        self.stats.net_units += payout
-        self.stats.max_bankroll_units = max(self.stats.max_bankroll_units, self.stats.net_units)
-        self.stats.min_bankroll_units = min(self.stats.min_bankroll_units, self.stats.net_units)
+        self.record_payout(payout)
         if result in {"win", "blackjack"}:
             self.stats.wins += 1
         elif result == "loss":
@@ -923,6 +937,11 @@ class BulkStrategySimulation:
             self.stats.pushes += 1
         elif result == "surrender":
             self.stats.losses += 1
+
+    def record_payout(self, payout: float) -> None:
+        self.stats.net_units += payout
+        self.stats.max_bankroll_units = max(self.stats.max_bankroll_units, self.stats.net_units)
+        self.stats.min_bankroll_units = min(self.stats.min_bankroll_units, self.stats.net_units)
 
 
 def run_bulk_strategy_simulation(payload: dict) -> dict:
@@ -965,6 +984,8 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
         "pushes": stats.pushes,
         "blackjacks": stats.blackjacks,
         "surrendered": stats.surrendered,
+        "insurance_bets": stats.insurance_bets,
+        "insurance_wins": stats.insurance_wins,
         "shoes": stats.shoes,
         "net_units": stats.net_units,
         "net_money": net_money,

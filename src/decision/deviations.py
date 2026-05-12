@@ -90,14 +90,6 @@ def check_deviation(hand: Hand, dealer_upcard: int, true_count: float) -> str | 
     dealer_upcard: 2–10, or 11 for ace.
     true_count:   current Hi-Lo true count (float).
     """
-    # Insurance — only offered when dealer shows an ace
-    if dealer_upcard == 11:
-        entry = _LOOKUP.get(('insurance', None))
-        if entry:
-            idx, act, _ = entry
-            if true_count >= idx:
-                return act
-
     # Determine situation key from hand
     sit: tuple | None = None
     if hand.is_pair and hand.pair_value != 5:
