@@ -926,6 +926,9 @@ class BulkStrategySimulation:
             self.stats.losses += 1
 
 
+_WONGING_PARTICIPATION_RATE = 0.09  # ~9% of loop iterations become played hands at TC≥2
+
+
 def run_bulk_strategy_simulation(payload: dict) -> dict:
     num_hands = int(payload.get("hands", payload.get("rounds", 100_000)))
     if num_hands < 1 or num_hands > 1_000_000:
@@ -942,17 +945,27 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
     raw_seed = payload.get("seed")
     seed = int(raw_seed) if raw_seed not in (None, "") else None
 
+    wonging          = bool(payload.get("wonging", True))
+    wonging_entry_tc = float(payload.get("wonging_entry_tc", 2.0))
+    wonging_exit_tc  = float(payload.get("wonging_exit_tc", 0.0))
+
+    # When wonging, num_hands is the loop iteration budget, not played hands.
+    # Scale up so the expected played-hand count matches what the user requested.
+    sim_hands = round(num_hands / _WONGING_PARTICIPATION_RATE) if wonging else num_hands
+
     params = SimParams(
-        num_hands       = num_hands,
-        num_decks       = decks,
-        das             = bool(payload.get("das", True)),
-        s17             = bool(payload.get("s17", True)),
-        surrender       = bool(payload.get("surrender", True)),
-        bet_spread      = 12,
-        index_plays     = True,
-        wonging         = bool(payload.get("wonging", False)),
-        seed            = seed,
-        unit            = unit_value,
+        num_hands        = sim_hands,
+        num_decks        = decks,
+        das              = bool(payload.get("das", True)),
+        s17              = bool(payload.get("s17", True)),
+        surrender        = bool(payload.get("surrender", True)),
+        bet_spread       = 12,
+        index_plays      = True,
+        wonging          = wonging,
+        wonging_entry_tc = wonging_entry_tc,
+        wonging_exit_tc  = wonging_exit_tc,
+        seed             = seed,
+        unit             = unit_value,
         starting_bankroll = 0.0,
     )
     r = SimulationRunner(params).run()
