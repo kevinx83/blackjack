@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .hand import Hand, Card
-from .basic_strategy import get_basic_action
+from .basic_strategy import get_basic_action, get_hard_fallback
 from .deviations import check_deviation
 from .count import HiLoCounter
 
@@ -168,8 +168,12 @@ class BlackjackAdvisor:
         # Restrict options that are not currently allowed
         if not can_double and raw in ('D', 'Dh', 'Ds'):
             raw = 'S' if raw == 'Ds' else 'H'
-        if not can_split and raw in ('P', 'Rp'):
-            raw = 'Rh'
+        if not can_split:
+            if raw == 'P':
+                # Fall back to hard-total strategy rather than blindly hitting
+                raw = get_hard_fallback(player_hand.total, dealer_val)
+            elif raw == 'Rp':
+                raw = 'Rh'  # surrender else hit (correct for 8,8 vs A treated as hard 16)
 
         final = _resolve(raw, can_double, can_split, can_surrender)
         bet = _bet_units(tc)

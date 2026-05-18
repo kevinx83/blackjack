@@ -83,16 +83,16 @@ class TestCountDeviations:
         result = make(self.adv, '9h', '7s', dealer='10d')
         assert result == SURRENDER
 
-    # 11 vs A: basic S17=Hit; double at TC >= 1
+    # 11 vs A: basic strategy is Double (6-deck S17 exact EV)
     def test_11_vs_A_double_at_tc1(self):
-        self._set_rc(5, 104)   # 5 / ~4 decks ≈ TC 1.25
+        self._set_rc(5, 104)
         result = make(self.adv, '7h', '4s', dealer='Ah')
         assert result == DOUBLE
 
-    def test_11_vs_A_hit_at_tc_zero(self):
+    def test_11_vs_A_double_at_tc_zero(self):
         self._set_rc(0, 104)
         result = make(self.adv, '7h', '4s', dealer='Ah')
-        assert result == HIT
+        assert result == DOUBLE
 
     # 9 vs 2: basic=Hit; double at TC >= 1
     def test_9_vs_2_double_at_tc1(self):

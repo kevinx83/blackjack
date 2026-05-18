@@ -45,8 +45,8 @@ class TestHardStrategy:
         for d in ['2', '3', '4', '5', '6', '7', '8', '9', '10']:
             assert act(hand('7h', '4s'), d) == 'D'
 
-    def test_hard_11_hit_vs_A_s17(self):
-        assert act(hand('7h', '4s'), 'A', s17=True) == 'H'
+    def test_hard_11_double_vs_A_s17(self):
+        assert act(hand('7h', '4s'), 'A', s17=True) == 'D'
 
     def test_hard_11_double_vs_A_h17(self):
         assert act(hand('7h', '4s'), 'A', s17=False) == 'D'
@@ -71,15 +71,16 @@ class TestHardStrategy:
         for d in ['7', '8', '9', '10', 'A']:
             assert act(hand('8h', '5s'), d) == 'H'
 
-    def test_hard_15_surrender_vs_10(self):
+    def test_hard_15_surrender_vs_9_10(self):
+        assert act(hand('9h', '6s'), '9') == 'Rh'
         assert act(hand('9h', '6s'), '10') == 'Rh'
 
     def test_hard_16_stand_vs_2_through_6(self):
         for d in ['2', '3', '4', '5', '6']:
             assert act(hand('9h', '7s'), d) == 'S'
 
-    def test_hard_16_surrender_vs_9_10_A(self):
-        for d in ['9', '10', 'A']:
+    def test_hard_16_surrender_vs_8_9_10_A(self):
+        for d in ['8', '9', '10', 'A']:
             assert act(hand('9h', '7s'), d) == 'Rh'
 
     def test_hard_17_always_stand(self):

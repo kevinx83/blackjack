@@ -35,9 +35,9 @@ _DEVIATIONS: list[tuple] = [
     ('insurance', None, 3,  'I'),
 
     # --- Hard hand deviations ---
-    (('hard', 16), 10,  0,  'S'),   # 16 vs 10: stand at TC >= 0  (basic: Rh/H)
-    (('hard', 16),  9,  5,  'S'),   # 16 vs 9:  stand at TC >= 5  (basic: H)
-    (('hard', 15), 10,  4,  'S'),   # 15 vs 10: stand at TC >= 4  (basic: Rh/H)
+    (('hard', 16), 10,  0,  'S'),   # 16 vs 10: stand at TC >= 0  (basic: Rh)
+    (('hard', 16),  9,  5,  'S'),   # 16 vs 9:  stand at TC >= 5  (basic: Rh)
+    (('hard', 15), 10,  4,  'S'),   # 15 vs 10: stand at TC >= 4  (basic: Rh)
     (('hard', 13),  2, -1,  'H'),   # 13 vs 2:  hit   at TC < -1  (basic: S)
     (('hard', 12),  2,  3,  'S'),   # 12 vs 2:  stand at TC >= 3  (basic: H)
     (('hard', 12),  3,  2,  'S'),   # 12 vs 3:  stand at TC >= 2  (basic: H)
@@ -45,7 +45,6 @@ _DEVIATIONS: list[tuple] = [
     (('hard', 12),  5, -2,  'H'),   # 12 vs 5:  hit   at TC < -2  (basic: S)
     (('hard', 12),  6, -1,  'H'),   # 12 vs 6:  hit   at TC < -1  (basic: S)
     (('hard', 13),  3, -2,  'H'),   # 13 vs 3:  hit   at TC < -2  (basic: S)
-    (('hard', 11), 11,  1,  'D'),   # 11 vs A:  double at TC >= 1 (basic S17: H)
     (('hard', 10), 10,  4,  'D'),   # 10 vs 10: double at TC >= 4 (basic: H)
     (('hard', 10), 11,  4,  'D'),   # 10 vs A:  double at TC >= 4 (basic: H)
     (('hard',  9),  2,  1,  'D'),   # 9  vs 2:  double at TC >= 1 (basic: H)
@@ -87,17 +86,12 @@ def check_deviation(hand: Hand, dealer_upcard: int, true_count: float) -> str | 
     Return a deviation action code if a count-based index play applies,
     or None to signal that basic strategy should be used.
 
+    Insurance is a side-bet handled separately via BlackjackAdvisor.insurance_advised();
+    it is intentionally excluded here so it never overrides the hand-play decision.
+
     dealer_upcard: 2–10, or 11 for ace.
     true_count:   current Hi-Lo true count (float).
     """
-    # Insurance — only offered when dealer shows an ace
-    if dealer_upcard == 11:
-        entry = _LOOKUP.get(('insurance', None))
-        if entry:
-            idx, act, _ = entry
-            if true_count >= idx:
-                return act
-
     # Determine situation key from hand
     sit: tuple | None = None
     if hand.is_pair and hand.pair_value != 5:
