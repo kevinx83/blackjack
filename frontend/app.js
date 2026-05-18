@@ -115,6 +115,18 @@ function parseBulkHands(value) {
   return { valid: true, value: parsed, error: "" };
 }
 
+function parseBulkSimulations(value) {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    return { valid: false, value: null, error: "Simulations must be a whole number." };
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (parsed < 1 || parsed > 50) {
+    return { valid: false, value: parsed, error: "Simulations must be between 1 and 50." };
+  }
+  return { valid: true, value: parsed, error: "" };
+}
+
 function parseUnitValue(value) {
   const raw = String(value).trim();
   if (!/^\d+(\.\d+)?$/.test(raw)) {
@@ -625,6 +637,7 @@ function BulkPage({ navigate }) {
     s17: true,
     surrender: true,
     hands: "100000",
+    simulations: "1",
     unit_value: "1",
     seed: "",
   });
@@ -633,6 +646,7 @@ function BulkPage({ navigate }) {
   const [busy, setBusy] = useState(false);
 
   const parsedHands = parseBulkHands(settings.hands);
+  const parsedSimulations = parseBulkSimulations(settings.simulations);
   const parsedUnitValue = parseUnitValue(settings.unit_value);
 
   function setRule(key, value) {
@@ -644,10 +658,15 @@ function BulkPage({ navigate }) {
     setMessage("");
     try {
       if (!parsedHands.valid) throw new Error(parsedHands.error);
+      if (!parsedSimulations.valid) throw new Error(parsedSimulations.error);
       if (!parsedUnitValue.valid) throw new Error(parsedUnitValue.error);
+      if (parsedHands.value * parsedSimulations.value > 5000000) {
+        throw new Error("Total simulated hands must be 5,000,000 or fewer.");
+      }
       const payload = await api("/api/bulk/run", {
         ...settings,
         hands: parsedHands.value,
+        simulations: parsedSimulations.value,
         unit_value: parsedUnitValue.value,
       });
       setResult(payload);
@@ -667,6 +686,7 @@ function BulkPage({ navigate }) {
         runBulk,
         busy,
         parsedHands,
+        parsedSimulations,
         parsedUnitValue,
       })
     ),
@@ -678,7 +698,7 @@ function BulkPage({ navigate }) {
           h("span", { className: "mode-kicker" }, "Strategy Backtest"),
           h("h2", null, result ? formatMoney(result.net_money) : "Ready to simulate"),
           h("p", null, result
-            ? `${formatLargeNumber(result.rounds)} rounds autoplayed with engine decisions`
+            ? `${formatLargeNumber(result.rounds)} total rounds across ${result.simulations} simulation${result.simulations === 1 ? "" : "s"}`
             : "Run a large sample using the same recommendation engine and Hi-Lo bet ramp.")
         ),
         h("button", { className: "primary", onClick: runBulk, disabled: busy },
@@ -690,7 +710,7 @@ function BulkPage({ navigate }) {
   );
 }
 
-function BulkSettingsPanel({ settings, setRule, runBulk, busy, parsedHands, parsedUnitValue }) {
+function BulkSettingsPanel({ settings, setRule, runBulk, busy, parsedHands, parsedSimulations, parsedUnitValue }) {
   return h("section", { className: "panel" },
     h("div", { className: "panel-title" }, "Run Setup"),
     h("label", { className: "field" },
@@ -703,6 +723,18 @@ function BulkSettingsPanel({ settings, setRule, runBulk, busy, parsedHands, pars
       }),
       h("small", { className: parsedHands.valid ? "" : "field-error" },
         parsedHands.valid ? "Initial rounds to deal, up to 1,000,000." : parsedHands.error
+      )
+    ),
+    h("label", { className: "field" },
+      h("span", null, "Simulations"),
+      h("input", {
+        type: "text",
+        inputMode: "numeric",
+        value: settings.simulations,
+        onChange: (event) => setRule("simulations", event.target.value),
+      }),
+      h("small", { className: parsedSimulations.valid ? "" : "field-error" },
+        parsedSimulations.valid ? "Independent repeats. Example: 10 x 100,000." : parsedSimulations.error
       )
     ),
     h("label", { className: "field" },
@@ -772,11 +804,12 @@ function BulkResultDashboard({ result, unitValue }) {
     h("div", { className: netClass },
       h("span", null, "Net Result"),
       h("strong", null, formatMoney(result.net_money)),
-      h("em", null, `${formatUnits(result.net_units)} units at ${formatMoney(unitValue)} per unit`)
+      h("em", null, `${formatUnits(result.net_units)} units total; avg ${formatUnits(result.average_net_units)} per simulation`)
     ),
     h("div", { className: "panel stat-panel" },
       h("div", { className: "panel-title" }, "Volume"),
       h("div", { className: "stat-grid bulk-stat-grid" },
+        h(Stat, { label: "Simulations", value: formatLargeNumber(result.simulations) }),
         h(Stat, { label: "Rounds", value: formatLargeNumber(result.rounds) }),
         h(Stat, { label: "Hands", value: formatLargeNumber(result.hands_played) }),
         h(Stat, { label: "Decisions", value: formatLargeNumber(result.decisions) }),
@@ -791,6 +824,7 @@ function BulkResultDashboard({ result, unitValue }) {
         h(Stat, { label: "Pushes", value: formatLargeNumber(result.pushes) }),
         h(Stat, { label: "Blackjacks", value: formatLargeNumber(result.blackjacks) }),
         h(Stat, { label: "Surrenders", value: formatLargeNumber(result.surrendered) }),
+        h(Stat, { label: "Insurance", value: formatLargeNumber(result.insurance_bets) }),
         h(Stat, { label: "Win Rate", value: `${formatNumber(result.win_rate * 100, 1)}%` })
       )
     ),
@@ -798,11 +832,41 @@ function BulkResultDashboard({ result, unitValue }) {
       h("div", { className: "panel-title" }, "Money Trail"),
       h("div", { className: "stat-grid bulk-stat-grid" },
         h(Stat, { label: "Wagered", value: `${formatUnits(result.total_wagered_units)} units` }),
-        h(Stat, { label: "High Water", value: `${formatUnits(result.max_bankroll_units)} units` }),
-        h(Stat, { label: "Low Water", value: `${formatUnits(result.min_bankroll_units)} units` }),
-        h(Stat, { label: "Unit", value: formatMoney(result.unit_value) })
+        h(Stat, { label: "Best Run", value: `${formatUnits(result.best_net_units)} units` }),
+        h(Stat, { label: "Worst Run", value: `${formatUnits(result.worst_net_units)} units` }),
+        h(Stat, { label: "Profitable", value: `${result.winning_simulations}/${result.simulations}` }),
+        h(Stat, { label: "Unit", value: formatMoney(result.unit_value) }),
+        h(Stat, { label: "Penetration", value: "75%" })
       )
-    )
+    ),
+    h(BulkRunsPanel, { runs: result.runs || [], unitValue })
+  );
+}
+
+function BulkRunsPanel({ runs, unitValue }) {
+  return h("div", { className: "panel bulk-runs-panel" },
+    h("div", { className: "panel-title" }, "Individual Runs"),
+    runs.length
+      ? h("div", { className: "bulk-run-table" },
+          h("div", { className: "bulk-run-row bulk-run-head" },
+            h("span", null, "Run"),
+            h("span", null, "Net"),
+            h("span", null, "Money"),
+            h("span", null, "Wagered"),
+            h("span", null, "Insurance")
+          ),
+          runs.map((run) => h("div", {
+            className: run.net_units >= 0 ? "bulk-run-row positive" : "bulk-run-row negative",
+            key: `bulk-run-${run.run}`,
+          },
+            h("span", null, `#${run.run}`),
+            h("strong", null, `${formatUnits(run.net_units)}u`),
+            h("span", null, formatMoney(run.net_money)),
+            h("span", null, `${formatUnits(run.total_wagered_units)}u`),
+            h("span", null, `${formatLargeNumber(run.insurance_bets)} / ${formatLargeNumber(run.insurance_wins)}`)
+          ))
+        )
+      : h("span", { className: "muted" }, "No individual run data")
   );
 }
 

@@ -689,6 +689,8 @@ class BulkStats:
     min_bankroll_units: float = 0.0
     shoes: int = 0
     decisions: int = 0
+    insurance_bets: int = 0
+    insurance_wins: int = 0
 
 
 class BulkStrategySimulation:
@@ -720,10 +722,7 @@ class BulkStrategySimulation:
         ]
         self.rng.shuffle(self.shoe)
         shoe_cards = self.rules.num_decks * 52
-        self.shuffle_at_cards_seen = self.rng.randint(
-            int(shoe_cards * 0.50),
-            int(shoe_cards * 0.75),
-        )
+        self.shuffle_at_cards_seen = int(shoe_cards * 0.75)
         self.stats.shoes += 1
 
     def should_shuffle_before_round(self) -> bool:
@@ -756,6 +755,7 @@ class BulkStrategySimulation:
 
         player_hand = self.hands[0].as_hand()
         dealer_hand = Hand(self.dealer_cards)
+        self.resolve_insurance_if_advised(selected_bet, dealer_hand)
         if dealer_hand.is_blackjack or player_hand.is_blackjack:
             self.reveal_dealer()
             if dealer_hand.is_blackjack and player_hand.is_blackjack:
@@ -779,6 +779,19 @@ class BulkStrategySimulation:
             for hand in self.hands:
                 if hand.status == "bust":
                     self.finish_hand(hand, "loss", -hand.bet)
+
+    def resolve_insurance_if_advised(self, original_bet: float, dealer_hand: Hand) -> None:
+        if self.dealer_cards[0].rank != "A" or not self.advisor.insurance_advised():
+            return
+
+        insurance_bet = original_bet / 2
+        self.stats.insurance_bets += 1
+        self.stats.total_wagered_units += insurance_bet
+        if dealer_hand.is_blackjack:
+            self.stats.insurance_wins += 1
+            self.record_payout(insurance_bet * 2)
+        else:
+            self.record_payout(-insurance_bet)
 
     def play_player_hands(self) -> None:
         index = 0
@@ -912,9 +925,7 @@ class BulkStrategySimulation:
         hand.result = result
         hand.payout = payout
         self.stats.hands += 1
-        self.stats.net_units += payout
-        self.stats.max_bankroll_units = max(self.stats.max_bankroll_units, self.stats.net_units)
-        self.stats.min_bankroll_units = min(self.stats.min_bankroll_units, self.stats.net_units)
+        self.record_payout(payout)
         if result in {"win", "blackjack"}:
             self.stats.wins += 1
         elif result == "loss":
@@ -924,11 +935,22 @@ class BulkStrategySimulation:
         elif result == "surrender":
             self.stats.losses += 1
 
+    def record_payout(self, payout: float) -> None:
+        self.stats.net_units += payout
+        self.stats.max_bankroll_units = max(self.stats.max_bankroll_units, self.stats.net_units)
+        self.stats.min_bankroll_units = min(self.stats.min_bankroll_units, self.stats.net_units)
+
 
 def run_bulk_strategy_simulation(payload: dict) -> dict:
     rounds = int(payload.get("hands", payload.get("rounds", 100000)))
     if rounds < 1 or rounds > 1_000_000:
         raise ValueError("Hands must be between 1 and 1,000,000")
+
+    simulations = int(payload.get("simulations", 1))
+    if simulations < 1 or simulations > 50:
+        raise ValueError("Simulations must be between 1 and 50")
+    if rounds * simulations > 5_000_000:
+        raise ValueError("Total simulated hands must be 5,000,000 or fewer")
 
     decks = int(payload.get("num_decks", 6))
     if decks < 1 or decks > 8:
@@ -946,9 +968,25 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
         s17=bool(payload.get("s17", True)),
         surrender=bool(payload.get("surrender", True)),
     )
-    simulator = BulkStrategySimulation(rules, seed=seed)
-    stats = simulator.run(rounds)
-    net_money = stats.net_units * unit_value
+
+    run_results = []
+    totals = BulkStats()
+    best_run: dict | None = None
+    worst_run: dict | None = None
+    for index in range(simulations):
+        run_seed = seed + index if seed is not None else None
+        simulator = BulkStrategySimulation(rules, seed=run_seed)
+        stats = simulator.run(rounds)
+        result = bulk_result_payload(stats, rounds, unit_value, index + 1, run_seed)
+        run_results.append(result)
+        add_bulk_stats(totals, stats)
+        if best_run is None or result["net_units"] > best_run["net_units"]:
+            best_run = result
+        if worst_run is None or result["net_units"] < worst_run["net_units"]:
+            worst_run = result
+
+    net_money = totals.net_units * unit_value
+    winning_simulations = sum(1 for result in run_results if result["net_units"] > 0)
     return {
         "rules": {
             "num_decks": rules.num_decks,
@@ -957,6 +995,64 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
             "surrender": rules.surrender,
         },
         "requested_hands": rounds,
+        "simulations": simulations,
+        "total_requested_hands": rounds * simulations,
+        "rounds": totals.rounds,
+        "hands_played": totals.hands,
+        "decisions": totals.decisions,
+        "wins": totals.wins,
+        "losses": totals.losses,
+        "pushes": totals.pushes,
+        "blackjacks": totals.blackjacks,
+        "surrendered": totals.surrendered,
+        "insurance_bets": totals.insurance_bets,
+        "insurance_wins": totals.insurance_wins,
+        "shoes": totals.shoes,
+        "net_units": totals.net_units,
+        "net_money": net_money,
+        "unit_value": unit_value,
+        "total_wagered_units": totals.total_wagered_units,
+        "max_bankroll_units": best_run["max_bankroll_units"] if best_run else 0,
+        "min_bankroll_units": worst_run["min_bankroll_units"] if worst_run else 0,
+        "average_net_units": totals.net_units / simulations,
+        "average_net_money": net_money / simulations,
+        "best_net_units": best_run["net_units"] if best_run else 0,
+        "worst_net_units": worst_run["net_units"] if worst_run else 0,
+        "winning_simulations": winning_simulations,
+        "win_rate": totals.wins / totals.hands if totals.hands else 0,
+        "loss_rate": totals.losses / totals.hands if totals.hands else 0,
+        "push_rate": totals.pushes / totals.hands if totals.hands else 0,
+        "runs": run_results,
+    }
+
+
+def add_bulk_stats(total: BulkStats, stats: BulkStats) -> None:
+    total.rounds += stats.rounds
+    total.hands += stats.hands
+    total.wins += stats.wins
+    total.losses += stats.losses
+    total.pushes += stats.pushes
+    total.blackjacks += stats.blackjacks
+    total.surrendered += stats.surrendered
+    total.net_units += stats.net_units
+    total.total_wagered_units += stats.total_wagered_units
+    total.shoes += stats.shoes
+    total.decisions += stats.decisions
+    total.insurance_bets += stats.insurance_bets
+    total.insurance_wins += stats.insurance_wins
+
+
+def bulk_result_payload(
+    stats: BulkStats,
+    requested_hands: int,
+    unit_value: float,
+    run_number: int,
+    seed: int | None,
+) -> dict:
+    return {
+        "run": run_number,
+        "seed": seed,
+        "requested_hands": requested_hands,
         "rounds": stats.rounds,
         "hands_played": stats.hands,
         "decisions": stats.decisions,
@@ -965,10 +1061,11 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
         "pushes": stats.pushes,
         "blackjacks": stats.blackjacks,
         "surrendered": stats.surrendered,
+        "insurance_bets": stats.insurance_bets,
+        "insurance_wins": stats.insurance_wins,
         "shoes": stats.shoes,
         "net_units": stats.net_units,
-        "net_money": net_money,
-        "unit_value": unit_value,
+        "net_money": stats.net_units * unit_value,
         "total_wagered_units": stats.total_wagered_units,
         "max_bankroll_units": stats.max_bankroll_units,
         "min_bankroll_units": stats.min_bankroll_units,
