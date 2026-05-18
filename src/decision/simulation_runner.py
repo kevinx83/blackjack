@@ -76,6 +76,8 @@ class SimResult:
     double_win_rate:    float
     split_rate:         float
     max_drawdown_units: float
+    peak_net_units:     float  # highest cumulative net at any point in the run
+    trough_net_units:   float  # lowest cumulative net at any point in the run
     final_bankroll:     float
     risk_of_ruin_est:   float  # estimated from simulation
     hands_per_second:   float
@@ -418,6 +420,9 @@ class SimulationRunner:
         min_bankroll     = p.starting_bankroll
         bankroll         = p.starting_bankroll
         peak_bankroll    = p.starting_bankroll
+        cumulative_net   = 0.0
+        peak_net         = 0.0
+        trough_net       = 0.0
         hand_results: list[float] = []
 
         for hand_num in range(p.num_hands):
@@ -585,11 +590,14 @@ class SimulationRunner:
                 total_wagered += final_bet
                 hand_results.append(hand_net / final_bet if final_bet else 0.0)
 
-            net_units    += result + insurance_net
-            hands_played += 1
-            bankroll     += (result + insurance_net) * p.unit
-            peak_bankroll = max(peak_bankroll, bankroll)
-            min_bankroll  = min(min_bankroll, bankroll)
+            net_units      += result + insurance_net
+            hands_played   += 1
+            bankroll       += (result + insurance_net) * p.unit
+            peak_bankroll   = max(peak_bankroll, bankroll)
+            min_bankroll    = min(min_bankroll, bankroll)
+            cumulative_net += result + insurance_net
+            peak_net        = max(peak_net, cumulative_net)
+            trough_net      = min(trough_net, cumulative_net)
 
         elapsed = time.perf_counter() - start
 
@@ -634,6 +642,8 @@ class SimulationRunner:
             double_win_rate    = doubles_won / max(1, doubles_total),
             split_rate         = splits / total_hands_nz,
             max_drawdown_units = max_dd / p.unit if p.unit else 0,
+            peak_net_units     = peak_net,
+            trough_net_units   = trough_net,
             final_bankroll     = bankroll,
             risk_of_ruin_est   = ror,
             hands_per_second   = speed,
