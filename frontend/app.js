@@ -624,6 +624,7 @@ function BulkPage({ navigate }) {
     das: true,
     s17: true,
     surrender: true,
+    wonging: true,
     hands: "100000",
     unit_value: "1",
     seed: "",
@@ -752,6 +753,11 @@ function BulkSettingsPanel({ settings, setRule, runBulk, busy, parsedHands, pars
       label: "Late surrender",
       checked: settings.surrender,
       onChange: (value) => setRule("surrender", value),
+    }),
+    h(Toggle, {
+      label: "Wonging / back-counting",
+      checked: settings.wonging,
+      onChange: (value) => setRule("wonging", value),
     }),
     h("button", { className: "primary full", onClick: runBulk, disabled: busy },
       busy ? "Running..." : "Run Simulation"
