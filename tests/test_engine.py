@@ -24,12 +24,12 @@ class TestBasicStrategyViaEngine:
         result = make(self.adv, '9h', '7s', dealer='10h')
         assert result == STAND
 
-    def test_hard_16_vs_10_surrender_at_negative_tc(self):
-        # Below deviation index → basic Rh → SURRENDER
+    def test_hard_16_vs_10_at_negative_tc(self):
+        # RC=-8, seen=52 → DR≈(312-52)/52≈5 → TC=-8/5=-1.6 → Sweet16 fires → HIT
         self.adv.counter.running_count = -8
         self.adv.counter.cards_seen = 52
         result = make(self.adv, '9h', '7s', dealer='10h')
-        assert result == SURRENDER
+        assert result == HIT   # Sweet 16: at TC < -1, hit instead of surrender
 
     def test_hard_11_vs_7_double(self):
         result = make(self.adv, '7h', '4s', dealer='7d')
@@ -78,10 +78,11 @@ class TestCountDeviations:
         result = make(self.adv, '9h', '7s', dealer='10d')
         assert result == STAND
 
-    def test_16_vs_10_surrender_at_negative_tc(self):
-        self._set_rc(-12, 104)  # TC < 0
+    def test_16_vs_10_hit_at_very_negative_tc(self):
+        # RC=-12, seen=104 → DR≈(312-104)/52≈4 → TC=-3 → Sweet16 fires → HIT
+        self._set_rc(-12, 104)
         result = make(self.adv, '9h', '7s', dealer='10d')
-        assert result == SURRENDER
+        assert result == HIT   # Sweet 16: TC < -1 → hit instead of surrender
 
     # 11 vs A: basic strategy is Double (6-deck S17 exact EV)
     def test_11_vs_A_double_at_tc1(self):
@@ -219,8 +220,8 @@ class TestBetSizing:
         return self.adv.recommend(player, dealer).bet_units
 
     def test_high_tc_max_bet(self):
-        units = self._tc_rec(25, 104)   # TC ≈ 6.25
-        assert units == 8
+        units = self._tc_rec(25, 104)   # TC ≈ 6.25 → 12 units (1:12 spread)
+        assert units == 12
 
     def test_neutral_tc_flat_bet(self):
         units = self._tc_rec(0)
