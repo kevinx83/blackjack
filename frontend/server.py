@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.decision.engine import BlackjackAdvisor, bet_units_for_true_count  # noqa: E402
 from src.decision.hand import Card, Hand, parse_card  # noqa: E402
+from src.decision.simulation_runner import SimulationRunner, SimParams  # noqa: E402
 
 
 RANKS = {"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
@@ -926,8 +927,8 @@ class BulkStrategySimulation:
 
 
 def run_bulk_strategy_simulation(payload: dict) -> dict:
-    rounds = int(payload.get("hands", payload.get("rounds", 100000)))
-    if rounds < 1 or rounds > 1_000_000:
+    num_hands = int(payload.get("hands", payload.get("rounds", 100_000)))
+    if num_hands < 1 or num_hands > 1_000_000:
         raise ValueError("Hands must be between 1 and 1,000,000")
 
     decks = int(payload.get("num_decks", 6))
@@ -940,41 +941,52 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
 
     raw_seed = payload.get("seed")
     seed = int(raw_seed) if raw_seed not in (None, "") else None
-    rules = TableRules(
-        num_decks=decks,
-        das=bool(payload.get("das", True)),
-        s17=bool(payload.get("s17", True)),
-        surrender=bool(payload.get("surrender", True)),
+
+    params = SimParams(
+        num_hands       = num_hands,
+        num_decks       = decks,
+        das             = bool(payload.get("das", True)),
+        s17             = bool(payload.get("s17", True)),
+        surrender       = bool(payload.get("surrender", True)),
+        bet_spread      = 12,
+        index_plays     = True,
+        wonging         = False,
+        seed            = seed,
+        unit            = unit_value,
+        starting_bankroll = 0.0,
     )
-    simulator = BulkStrategySimulation(rules, seed=seed)
-    stats = simulator.run(rounds)
-    net_money = stats.net_units * unit_value
+    r = SimulationRunner(params).run()
+
+    n = max(1, r.num_hands_played)
     return {
         "rules": {
-            "num_decks": rules.num_decks,
-            "das": rules.das,
-            "s17": rules.s17,
-            "surrender": rules.surrender,
+            "num_decks": decks,
+            "das": params.das,
+            "s17": params.s17,
+            "surrender": params.surrender,
         },
-        "requested_hands": rounds,
-        "rounds": stats.rounds,
-        "hands_played": stats.hands,
-        "decisions": stats.decisions,
-        "wins": stats.wins,
-        "losses": stats.losses,
-        "pushes": stats.pushes,
-        "blackjacks": stats.blackjacks,
-        "surrendered": stats.surrendered,
-        "shoes": stats.shoes,
-        "net_units": stats.net_units,
-        "net_money": net_money,
-        "unit_value": unit_value,
-        "total_wagered_units": stats.total_wagered_units,
-        "max_bankroll_units": stats.max_bankroll_units,
-        "min_bankroll_units": stats.min_bankroll_units,
-        "win_rate": stats.wins / stats.hands if stats.hands else 0,
-        "loss_rate": stats.losses / stats.hands if stats.hands else 0,
-        "push_rate": stats.pushes / stats.hands if stats.hands else 0,
+        "requested_hands": num_hands,
+        "rounds":              r.num_hands_played,
+        "hands_played":        r.num_hands_played,
+        "decisions":           r.num_hands_played,
+        "shoes":               r.num_shoes,
+        "wins":                round(r.win_rate * n),
+        "losses":              round(r.loss_rate * n),
+        "pushes":              round(r.push_rate * n),
+        "blackjacks":          round(r.blackjack_rate * n),
+        "surrendered":         round(r.surrender_rate * n),
+        "net_units":           r.net_units,
+        "net_money":           r.net_units * unit_value,
+        "unit_value":          unit_value,
+        "total_wagered_units": r.total_wagered,
+        "max_bankroll_units":  r.peak_net_units,
+        "min_bankroll_units":  r.trough_net_units,
+        "win_rate":            r.win_rate,
+        "loss_rate":           r.loss_rate,
+        "push_rate":           r.push_rate,
+        "mean_edge":           r.mean_edge,
+        "std_dev":             r.std_dev_per_hand,
+        "elapsed_sec":         r.elapsed_sec,
     }
 
 
