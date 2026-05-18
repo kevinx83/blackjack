@@ -71,17 +71,23 @@ class TestHardStrategy:
         for d in ['7', '8', '9', '10', 'A']:
             assert act(hand('8h', '5s'), d) == 'H'
 
-    def test_hard_15_surrender_vs_9_10(self):
-        assert act(hand('9h', '6s'), '9') == 'Rh'
+    def test_hard_15_strategy_vs_9_10(self):
+        # S17 6-deck: 15 vs 9 = H (EV(hit) marginally > −0.5 in S17)
+        assert act(hand('9h', '6s'), '9') == 'H'
+        # 15 vs 10 = Rh (surrender): EV(hit) ≈ −0.54 < −0.5
         assert act(hand('9h', '6s'), '10') == 'Rh'
 
     def test_hard_16_stand_vs_2_through_6(self):
         for d in ['2', '3', '4', '5', '6']:
             assert act(hand('9h', '7s'), d) == 'S'
 
-    def test_hard_16_surrender_vs_8_9_10_A(self):
-        for d in ['8', '9', '10', 'A']:
-            assert act(hand('9h', '7s'), d) == 'Rh'
+    def test_hard_16_strategy_vs_8_through_A(self):
+        # S17 6-deck: 16 vs 8,9,10 = Rh (surrender/hit — EV(hit) < −0.5)
+        for d in ['8', '9', '10']:
+            assert act(hand('9h', '7s'), d) == 'Rh', f"16 vs {d}"
+        # 16 vs A in S17: H (EV(hit) ≈ −0.492 > −0.5; surrender in H17 via override)
+        assert act(hand('9h', '7s'), 'A', s17=True) == 'H'
+        assert act(hand('9h', '7s'), 'A', s17=False) == 'Rh'
 
     def test_hard_17_always_stand(self):
         for d in ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'A']:
