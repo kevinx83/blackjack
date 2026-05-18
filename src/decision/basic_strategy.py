@@ -27,19 +27,17 @@ _HARD: dict[int, list[str]] = {
     8:  ['H',  'H',  'H',  'H',  'H',  'H',  'H',  'H',  'H',  'H'],
     9:  ['H',  'D',  'D',  'D',  'D',  'H',  'H',  'H',  'H',  'H'],
     10: ['D',  'D',  'D',  'D',  'D',  'D',  'D',  'D',  'H',  'H'],
-    11: ['D',  'D',  'D',  'D',  'D',  'D',  'D',  'D',  'D',  'H'],  # S17: H vs A
+    11: ['D',  'D',  'D',  'D',  'D',  'D',  'D',  'D',  'D',  'D'],
     12: ['H',  'H',  'S',  'S',  'S',  'H',  'H',  'H',  'H',  'H'],
     13: ['S',  'S',  'S',  'S',  'S',  'H',  'H',  'H',  'H',  'H'],
     14: ['S',  'S',  'S',  'S',  'S',  'H',  'H',  'H',  'H',  'H'],
-    15: ['S',  'S',  'S',  'S',  'S',  'H',  'H',  'H',  'Rh', 'Rh'],
-    16: ['S',  'S',  'S',  'S',  'S',  'H',  'H',  'Rh', 'Rh', 'Rh'],
+    15: ['S',  'S',  'S',  'S',  'S',  'H',  'H',  'Rh', 'Rh', 'Rh'],
+    16: ['S',  'S',  'S',  'S',  'S',  'H',  'Rh', 'Rh', 'Rh', 'Rh'],
     17: ['S',  'S',  'S',  'S',  'S',  'S',  'S',  'S',  'S',  'S'],
 }
 
-# H17 override: hard 11 vs A becomes Double instead of Hit
-_HARD_H17_OVERRIDES: dict[tuple[int, int], str] = {
-    (11, 11): 'D',   # 11 vs A: Double in H17
-}
+# Hard 11 vs A is now Double in both S17 and H17 (exact 6-deck EV).
+_HARD_H17_OVERRIDES: dict[tuple[int, int], str] = {}
 
 # ---------------------------------------------------------------------------
 # Soft totals  (rows: non-ace card value 2–9, giving soft 13–20)
@@ -135,3 +133,13 @@ def get_basic_action(
     if not s17:
         action = _HARD_H17_OVERRIDES.get((capped, dealer_upcard), action)
     return action
+
+
+def get_hard_fallback(total: int, dealer_upcard: int) -> str:
+    """Hard-total-only lookup — used when a pair can't be split."""
+    di = _DI[dealer_upcard]
+    if total < 8:
+        return 'H'
+    if total > 17:
+        return 'S'
+    return _HARD[max(8, min(17, total))][di]
