@@ -154,6 +154,15 @@ class TestInsurance:
         self.adv.counter.cards_seen = 104   # ~TC 1.75
         assert not self.adv.insurance_advised()
 
+    def test_insurance_does_not_replace_hand_decision(self):
+        self.adv.counter.running_count = 20
+        self.adv.counter.cards_seen = 104   # TC 5
+        player = Hand([parse_card('Kh'), parse_card('Qs')])
+        dealer = parse_card('Ah')
+        rec = self.adv.recommend(player, dealer)
+        assert rec.action == STAND
+        assert rec.action != INSURANCE
+
 
 class TestActionResolution:
     """Verify conditional actions (D→H, Rh→H, Rp→P) resolve correctly."""
