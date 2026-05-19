@@ -12,6 +12,7 @@ Usage:
     advisor.observe(*state.new_cards)
 """
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 
 from src.decision.hand import Card
@@ -20,6 +21,10 @@ from src.vision.detector import Detection
 # Fraction of frame height below which cards are treated as player cards.
 # Cards above this line are dealer cards. Tune if your camera angle differs.
 _DEALER_ZONE_MAX_Y_FRAC = 0.45
+
+# Two detections whose centres are closer than this (pixels) are treated as
+# the same physical card. Set relative to a typical card width of ~80-100px.
+_POSITION_THRESHOLD = 80
 
 
 @dataclass
@@ -47,7 +52,9 @@ class StateParser:
         dealer_zone_max_y: float = _DEALER_ZONE_MAX_Y_FRAC,
     ) -> None:
         self._dealer_threshold = int(frame_height * dealer_zone_max_y)
-        self._seen: set[Card] = set()
+        # Track seen cards by bounding-box centre rather than Card identity so
+        # that two cards of the same rank (e.g. two 7s) are not collapsed into one.
+        self._seen_positions: list[tuple[int, int]] = []
         self._dealer_cards: list[Card] = []
         self._player_cards: list[Card] = []
 
@@ -62,6 +69,7 @@ class StateParser:
 
         dealer_cards: list[Card] = []
         player_cards: list[Card] = []
+        new_cards: list[Card] = []
 
         for det in detections:
             if det.center_y <= self._dealer_threshold:
@@ -69,8 +77,10 @@ class StateParser:
             else:
                 player_cards.append(det.card)
 
-        new_cards = [c for c in dealer_cards + player_cards if c not in self._seen]
-        self._seen.update(new_cards)
+            if not self._position_seen(det.center_x, det.center_y):
+                new_cards.append(det.card)
+                self._seen_positions.append((det.center_x, det.center_y))
+
         self._dealer_cards = dealer_cards
         self._player_cards = player_cards
 
@@ -94,14 +104,21 @@ class StateParser:
     # Internal
     # ------------------------------------------------------------------
 
+    def _position_seen(self, cx: int, cy: int) -> bool:
+        """True if any previously recorded card centre is within the threshold."""
+        return any(
+            math.hypot(cx - sx, cy - sy) < _POSITION_THRESHOLD
+            for sx, sy in self._seen_positions
+        )
+
     def _should_reset(self, detections: list[Detection]) -> bool:
         """
         Heuristic: if cards drop to 0 after we've already seen some,
         a new round has started (cards were swept off the table).
         """
-        return len(detections) == 0 and len(self._seen) > 0
+        return len(detections) == 0 and len(self._seen_positions) > 0
 
     def _reset_round(self) -> None:
-        self._seen.clear()
+        self._seen_positions = []
         self._dealer_cards = []
         self._player_cards = []
