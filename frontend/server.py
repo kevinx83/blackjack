@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.decision.engine import BlackjackAdvisor, bet_units_for_true_count  # noqa: E402
 from src.decision.hand import Card, Hand, parse_card  # noqa: E402
+from src.decision.simulation_runner import SimulationRunner, SimParams  # noqa: E402
 
 
 RANKS = {"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
@@ -941,9 +942,12 @@ class BulkStrategySimulation:
         self.stats.min_bankroll_units = min(self.stats.min_bankroll_units, self.stats.net_units)
 
 
+_WONGING_PARTICIPATION_RATE = 0.09  # ~9% of loop iterations become played hands at TC≥2
+
+
 def run_bulk_strategy_simulation(payload: dict) -> dict:
-    rounds = int(payload.get("hands", payload.get("rounds", 100000)))
-    if rounds < 1 or rounds > 1_000_000:
+    num_hands = int(payload.get("hands", payload.get("rounds", 100_000)))
+    if num_hands < 1 or num_hands > 1_000_000:
         raise ValueError("Hands must be between 1 and 1,000,000")
 
     simulations = int(payload.get("simulations", 1))
@@ -962,12 +966,33 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
 
     raw_seed = payload.get("seed")
     seed = int(raw_seed) if raw_seed not in (None, "") else None
-    rules = TableRules(
-        num_decks=decks,
-        das=bool(payload.get("das", True)),
-        s17=bool(payload.get("s17", True)),
-        surrender=bool(payload.get("surrender", True)),
+
+    wonging          = bool(payload.get("wonging", True))
+    wonging_entry_tc = float(payload.get("wonging_entry_tc", 2.0))
+    wonging_exit_tc  = float(payload.get("wonging_exit_tc", 0.0))
+
+    # When wonging, num_hands is the loop iteration budget, not played hands.
+    # Scale up so the expected played-hand count matches what the user requested.
+    sim_hands = round(num_hands / _WONGING_PARTICIPATION_RATE) if wonging else num_hands
+
+    params = SimParams(
+        num_hands        = sim_hands,
+        num_decks        = decks,
+        das              = bool(payload.get("das", True)),
+        s17              = bool(payload.get("s17", True)),
+        surrender        = bool(payload.get("surrender", True)),
+        bet_spread       = 12,
+        index_plays      = True,
+        wonging          = wonging,
+        wonging_entry_tc = wonging_entry_tc,
+        wonging_exit_tc  = wonging_exit_tc,
+        seed             = seed,
+        unit             = unit_value,
+        starting_bankroll = 0.0,
     )
+    r = SimulationRunner(params).run()
+
+    n = max(1, r.num_hands_played)
 
     run_results = []
     totals = BulkStats()
@@ -989,11 +1014,34 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
     winning_simulations = sum(1 for result in run_results if result["net_units"] > 0)
     return {
         "rules": {
-            "num_decks": rules.num_decks,
-            "das": rules.das,
-            "s17": rules.s17,
-            "surrender": rules.surrender,
+            "num_decks": decks,
+            "das": params.das,
+            "s17": params.s17,
+            "surrender": params.surrender,
+            "wonging": params.wonging,
         },
+        "requested_hands": num_hands,
+        "rounds":              r.num_hands_played,
+        "hands_played":        r.num_hands_played,
+        "decisions":           r.num_hands_played,
+        "shoes":               r.num_shoes,
+        "wins":                round(r.win_rate * n),
+        "losses":              round(r.loss_rate * n),
+        "pushes":              round(r.push_rate * n),
+        "blackjacks":          round(r.blackjack_rate * n),
+        "surrendered":         round(r.surrender_rate * n),
+        "net_units":           r.net_units,
+        "net_money":           r.net_units * unit_value,
+        "unit_value":          unit_value,
+        "total_wagered_units": r.total_wagered,
+        "max_bankroll_units":  r.peak_net_units,
+        "min_bankroll_units":  r.trough_net_units,
+        "win_rate":            r.win_rate,
+        "loss_rate":           r.loss_rate,
+        "push_rate":           r.push_rate,
+        "mean_edge":           r.mean_edge,
+        "std_dev":             r.std_dev_per_hand,
+        "elapsed_sec":         r.elapsed_sec,
         "requested_hands": rounds,
         "simulations": simulations,
         "total_requested_hands": rounds * simulations,
