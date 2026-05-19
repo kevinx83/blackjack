@@ -953,7 +953,7 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
     simulations = int(payload.get("simulations", 1))
     if simulations < 1 or simulations > 50:
         raise ValueError("Simulations must be between 1 and 50")
-    if rounds * simulations > 5_000_000:
+    if num_hands * simulations > 5_000_000:
         raise ValueError("Total simulated hands must be 5,000,000 or fewer")
 
     decks = int(payload.get("num_decks", 6))
@@ -994,6 +994,13 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
 
     n = max(1, r.num_hands_played)
 
+    rules = TableRules(
+        num_decks=decks,
+        das=params.das,
+        s17=params.s17,
+        surrender=params.surrender,
+    )
+
     run_results = []
     totals = BulkStats()
     best_run: dict | None = None
@@ -1001,8 +1008,8 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
     for index in range(simulations):
         run_seed = seed + index if seed is not None else None
         simulator = BulkStrategySimulation(rules, seed=run_seed)
-        stats = simulator.run(rounds)
-        result = bulk_result_payload(stats, rounds, unit_value, index + 1, run_seed)
+        stats = simulator.run(num_hands)
+        result = bulk_result_payload(stats, num_hands, unit_value, index + 1, run_seed)
         run_results.append(result)
         add_bulk_stats(totals, stats)
         if best_run is None or result["net_units"] > best_run["net_units"]:
@@ -1042,9 +1049,9 @@ def run_bulk_strategy_simulation(payload: dict) -> dict:
         "mean_edge":           r.mean_edge,
         "std_dev":             r.std_dev_per_hand,
         "elapsed_sec":         r.elapsed_sec,
-        "requested_hands": rounds,
+        "requested_hands": num_hands,
         "simulations": simulations,
-        "total_requested_hands": rounds * simulations,
+        "total_requested_hands": num_hands * simulations,
         "rounds": totals.rounds,
         "hands_played": totals.hands,
         "decisions": totals.decisions,
