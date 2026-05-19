@@ -14,6 +14,12 @@ from ultralytics import YOLO
 
 from src.decision.hand import Card, parse_card
 
+# Ranks output by the trained 10-class model (J/Q/K merged into '10').
+# parse_card() is kept as a fallback for future suit-aware retrains.
+_RANK_ONLY_LABELS: frozenset[str] = frozenset(
+    {'A', '2', '3', '4', '5', '6', '7', '8', '9', '10'}
+)
+
 
 @dataclass(frozen=True)
 class Detection:
@@ -61,9 +67,13 @@ class CardDetector:
             if conf < self.conf_threshold:
                 continue
 
-            label = results.names[int(box.cls[0])]
+            label = results.names[int(box.cls[0])].strip()
             try:
-                card = parse_card(label)
+                if label.upper() in _RANK_ONLY_LABELS:
+                    # Trained model outputs rank only; suit is irrelevant for strategy.
+                    card = Card(label.upper(), 's')
+                else:
+                    card = parse_card(label)
             except ValueError:
                 continue
 
