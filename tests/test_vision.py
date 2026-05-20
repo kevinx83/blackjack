@@ -5,7 +5,7 @@ import pytest
 
 from src.decision.engine import BlackjackAdvisor
 from src.decision.hand import Card
-from src.vision.detector import Detection, _RANK_ONLY_LABELS
+from src.vision.detector import CardDetector, Detection, _RANK_ONLY_LABELS
 from src.vision.pipeline import Pipeline
 from src.vision.state_parser import StateParser, _POSITION_THRESHOLD
 
@@ -30,6 +30,37 @@ def test_rank_only_labels_contains_all_ten_model_classes():
 def test_rank_only_labels_excludes_suit_strings():
     for label in ('As', 'Kh', '10d', '7c'):
         assert label not in _RANK_ONLY_LABELS
+
+
+def test_detector_passes_conf_threshold_to_yolo():
+    class FakeBox:
+        conf = [0.6]
+        cls = [0]
+        xyxy = [[10, 20, 30, 40]]
+
+    class FakeResults:
+        names = {0: 'A'}
+        boxes = [FakeBox()]
+
+    class FakeModel:
+        def __init__(self):
+            self.kwargs = None
+
+        def __call__(self, frame, **kwargs):
+            self.kwargs = kwargs
+            return [FakeResults()]
+
+    detector = CardDetector.__new__(CardDetector)
+    detector.model = FakeModel()
+    detector.conf_threshold = 0.25
+
+    import numpy as np
+
+    detections = detector.detect(np.zeros((100, 100, 3), dtype=np.uint8))
+
+    assert detector.model.kwargs["conf"] == 0.25
+    assert detector.model.kwargs["verbose"] is False
+    assert detections[0].card == Card('A', 's')
 
 
 # ---------------------------------------------------------------------------

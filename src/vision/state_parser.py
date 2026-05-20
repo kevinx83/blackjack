@@ -22,9 +22,10 @@ from src.vision.detector import Detection
 # Cards above this line are dealer cards. Tune if your camera angle differs.
 _DEALER_ZONE_MAX_Y_FRAC = 0.45
 
-# Two detections whose centres are closer than this (pixels) are treated as
-# the same physical card. Set relative to a typical card width of ~80-100px.
-_POSITION_THRESHOLD = 80
+# Two detections whose centres are closer than this are treated as the same
+# detection across frames. The model emits rank-corner boxes, so this must stay
+# below the spacing between overlapping card corners in a hand.
+_POSITION_THRESHOLD = 35
 
 
 @dataclass

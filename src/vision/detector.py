@@ -59,7 +59,7 @@ class CardDetector:
         Duplicate detections of the same card (e.g. from overlapping boxes)
         are left for the state parser to handle — this layer stays simple.
         """
-        results = self.model(frame, verbose=False)[0]
+        results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
         detections: list[Detection] = []
 
         for box in results.boxes:
