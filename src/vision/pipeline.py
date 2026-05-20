@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 
 from src.decision.engine import BlackjackAdvisor, Recommendation
-from src.decision.hand import Hand
+from src.decision.hand import Card, Hand
 from src.vision.detector import CardDetector, Detection
 from src.vision.state_parser import GameState, StateParser
 
@@ -267,8 +267,8 @@ class Pipeline:
             self.counted_cards.extend(card.rank for card in state.new_cards)
             self.counted_cards = self.counted_cards[-COUNTED_HISTORY_LIMIT:]
 
-        rec = self._last_recommendation
-        if self.parser.dealer_upcard and state.player_cards:
+        rec: Recommendation | None = None
+        if self.parser.dealer_upcard and len(state.player_cards) >= 2:
             hand = Hand(state.player_cards)
             first_action = len(state.player_cards) == 2
             rec = self.advisor.recommend(
@@ -314,7 +314,7 @@ class Pipeline:
         self._draw_count_status(frame, count_status)
         cv2.putText(frame, 'r=round  n=shoe  q=quit',
                     (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1)
-        return self._draw_side_panel(frame, count_status)
+        return self._draw_side_panel(frame, state, rec, count_status)
 
     def _draw_zone_line(self, frame: np.ndarray, w: int, y: int) -> None:
         cv2.line(frame, (0, y), (w, y), (0, 255, 255), 1)
@@ -364,7 +364,13 @@ class Pipeline:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (245, 245, 245), 2)
             y += 24
 
-    def _draw_side_panel(self, frame: np.ndarray, count_status: dict) -> np.ndarray:
+    def _draw_side_panel(
+        self,
+        frame: np.ndarray,
+        state: GameState,
+        rec: Recommendation | None,
+        count_status: dict,
+    ) -> np.ndarray:
         h, w = frame.shape[:2]
         panel_x = w
         canvas = np.full((h, w + SIDE_PANEL_WIDTH, 3), (18, 27, 24), dtype=frame.dtype)
@@ -399,7 +405,10 @@ class Pipeline:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.56, (250, 250, 242), 2)
         self._reset_button_rect = (button_x1, button_y1, button_x2, button_y2)
 
-        y = button_y2 + 42
+        y = button_y2 + 36
+        y = self._draw_current_hand_panel(canvas, x, y, state, rec)
+
+        y += 26
         cv2.putText(canvas, 'COUNTED CARDS', (x, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.58, (236, 236, 226), 2)
         y += 28
@@ -420,6 +429,72 @@ class Pipeline:
                 break
 
         return canvas
+
+    def _draw_current_hand_panel(
+        self,
+        canvas: np.ndarray,
+        x: int,
+        y: int,
+        state: GameState,
+        rec: Recommendation | None,
+    ) -> int:
+        cv2.putText(canvas, 'CURRENT HAND', (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.58, (236, 236, 226), 2)
+        y += 28
+
+        dealer = self._format_cards(state.dealer_cards)
+        player = self._format_cards(state.player_cards)
+        hand_label = self._hand_label(state.player_cards)
+
+        lines = [
+            f"Dealer: {dealer or '--'}",
+            f"Player: {player or '--'}",
+        ]
+        if hand_label:
+            lines.append(hand_label)
+
+        for line in lines:
+            cv2.putText(canvas, line, (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (218, 222, 214), 1)
+            y += 22
+
+        y += 8
+        if rec is None:
+            cv2.putText(canvas, 'Recommendation: waiting', (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (160, 170, 164), 1)
+            y += 22
+            cv2.putText(canvas, 'Need dealer + 2 player cards', (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (160, 170, 164), 1)
+            return y + 22
+
+        color = _ACTION_COLORS.get(rec.action, (255, 255, 255))
+        cv2.putText(canvas, 'Recommendation', (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, (218, 222, 214), 1)
+        y += 34
+        cv2.putText(canvas, rec.action, (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2)
+        y += 28
+        cv2.putText(canvas, f"Bet {rec.bet_units}u  TC {rec.true_count:+.1f}", (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.46, (218, 222, 214), 1)
+        if rec.is_deviation:
+            y += 22
+            cv2.putText(canvas, 'Index deviation', (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.46, (0, 220, 255), 1)
+        return y
+
+    def _format_cards(self, cards: list[Card]) -> str:
+        return ' '.join(card.rank for card in cards)
+
+    def _hand_label(self, cards: list[Card]) -> str:
+        if not cards:
+            return ''
+        hand = Hand(cards)
+        if hand.is_blackjack:
+            return 'Blackjack'
+        if hand.is_bust:
+            return f"Bust {hand.total}"
+        hand_type = 'Soft' if hand.is_soft else 'Hard'
+        return f"{hand_type} {hand.total}"
 
 
 def main() -> None:

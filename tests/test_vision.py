@@ -228,6 +228,35 @@ def test_pipeline_process_frame_feeds_confirmed_cards_to_counter():
     assert pipeline.advisor.counter.cards_seen == 0
 
 
+def test_pipeline_requires_two_player_cards_for_recommendation():
+    class FakeDetector:
+        def detect(self, frame):
+            return [
+                det('A', 100, 50, 170, 130),
+                det('10', 220, 400, 290, 480),
+            ]
+
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.camera_index = 0
+    pipeline.detector = FakeDetector()
+    pipeline.advisor = BlackjackAdvisor(num_decks=6)
+    pipeline.parser = None
+    pipeline.confirmation_frames = 1
+    pipeline.empty_reset_frames = 8
+    pipeline._last_recommendation = None
+    pipeline.counted_cards = []
+    pipeline._reset_button_rect = None
+
+    import numpy as np
+
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    result = pipeline.process_frame(frame)
+
+    assert result.recommendation is None
+    assert result.state.dealer_cards == [Card('A', 's')]
+    assert result.state.player_cards == [Card('10', 's')]
+
+
 def test_pipeline_process_image_file_writes_annotated_summary(tmp_path):
     class FakeDetector:
         def detect(self, frame):
