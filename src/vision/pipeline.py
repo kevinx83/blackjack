@@ -4,6 +4,7 @@ Real-time blackjack advisor pipeline.
 Usage:
     python -m src.vision.pipeline
     python -m src.vision.pipeline --camera 1 --decks 6
+    python -m src.vision.pipeline --image examples/round.jpg --output annotated.jpg
 
 Keys:
     r — new round  (resets seen cards, keeps count)
@@ -12,6 +13,7 @@ Keys:
 """
 from __future__ import annotations
 import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -102,6 +104,64 @@ class Pipeline:
             cap.release()
             cv2.destroyAllWindows()
 
+    def run_images(
+        self,
+        image_paths: list[Path],
+        output_path: Path | None = None,
+        output_dir: Path | None = None,
+        show: bool = False,
+    ) -> list[dict]:
+        if output_path is not None and len(image_paths) != 1:
+            raise ValueError("--output can only be used with a single image")
+
+        summaries = []
+        try:
+            for image_path in image_paths:
+                target = output_path or self._default_image_output_path(image_path, output_dir)
+                summaries.append(self.process_image_file(image_path, target, show=show))
+                self.reset_round()
+        finally:
+            if show:
+                cv2.destroyAllWindows()
+
+        return summaries
+
+    def process_image_file(
+        self,
+        image_path: Path,
+        output_path: Path | None = None,
+        show: bool = False,
+    ) -> dict:
+        frame = cv2.imread(str(image_path))
+        if frame is None:
+            raise ValueError(f"Could not read image: {image_path}")
+
+        result = self.process_frame(frame)
+        annotated = self._draw(
+            frame.copy(),
+            result.detections,
+            result.state,
+            result.recommendation,
+            result.count_status,
+        )
+
+        if output_path is not None:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if not cv2.imwrite(str(output_path), annotated):
+                raise ValueError(f"Could not write annotated image: {output_path}")
+
+        if show:
+            cv2.imshow(WINDOW_NAME, annotated)
+            cv2.waitKey(0)
+
+        return self._image_summary(image_path, output_path, result)
+
+    def _default_image_output_path(self, image_path: Path, output_dir: Path | None) -> Path | None:
+        if output_dir is None:
+            return None
+        suffix = image_path.suffix if image_path.suffix else '.jpg'
+        return output_dir / f"{image_path.stem}_annotated{suffix}"
+
     def reset_round(self) -> None:
         if self.parser is not None:
             self.parser.new_round()
@@ -131,6 +191,54 @@ class Pipeline:
             "> Privacy & Security > Camera, then fully quit and reopen that "
             "terminal. If multiple cameras are connected, try --camera 1."
         )
+
+    def _image_summary(
+        self,
+        image_path: Path,
+        output_path: Path | None,
+        result: FrameResult,
+    ) -> dict:
+        return {
+            'image': str(image_path),
+            'output': str(output_path) if output_path is not None else None,
+            'dealer_cards': [card.rank for card in result.state.dealer_cards],
+            'player_cards': [card.rank for card in result.state.player_cards],
+            'counted_cards': [card.rank for card in result.state.new_cards],
+            'detections': [
+                {
+                    'card': det.card.rank,
+                    'confidence': round(det.confidence, 3),
+                    'bbox': det.bbox,
+                    'zone': self._zone_for_detection(det),
+                }
+                for det in result.detections
+            ],
+            'recommendation': self._recommendation_summary(result.recommendation),
+            'count': {
+                'running_count': result.count_status['running_count'],
+                'true_count': result.count_status['true_count'],
+                'cards_seen': result.count_status['cards_seen'],
+                'decks_remaining': result.count_status['decks_remaining'],
+                'recommended_bet_units': result.count_status['recommended_bet']['units'],
+            },
+        }
+
+    def _zone_for_detection(self, det: Detection) -> str:
+        if self.parser is None:
+            return 'unknown'
+        return 'dealer' if det.center_y <= self.parser._dealer_threshold else 'player'
+
+    def _recommendation_summary(self, rec: Recommendation | None) -> dict | None:
+        if rec is None:
+            return None
+        return {
+            'action': rec.action,
+            'raw_code': rec.raw_code,
+            'is_deviation': rec.is_deviation,
+            'true_count': rec.true_count,
+            'bet_units': rec.bet_units,
+            'reasoning': rec.reasoning,
+        }
 
     def process_frame(self, frame: np.ndarray) -> FrameResult:
         """
@@ -318,13 +426,34 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default=str(DEFAULT_MODEL_PATH), help='Path to best.pt')
     parser.add_argument('--camera', type=int, default=0)
+    parser.add_argument(
+        '--image',
+        nargs='+',
+        type=Path,
+        help='Process one or more static blackjack images instead of webcam input',
+    )
+    parser.add_argument(
+        '--output',
+        type=Path,
+        help='Annotated output image path. Use only with a single --image input.',
+    )
+    parser.add_argument(
+        '--output-dir',
+        type=Path,
+        help='Directory for annotated static-image outputs',
+    )
+    parser.add_argument(
+        '--show-image',
+        action='store_true',
+        help='Open annotated static-image output windows after processing',
+    )
     parser.add_argument('--decks', type=int, default=6)
     parser.add_argument('--conf', type=float, default=0.5)
     parser.add_argument(
         '--confirm-frames',
         type=int,
-        default=2,
-        help='Frames a detection must persist before it is counted',
+        default=None,
+        help='Frames a detection must persist before it is counted. Defaults to 1 for --image, 2 for webcam.',
     )
     parser.add_argument(
         '--empty-reset-frames',
@@ -334,14 +463,35 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    Pipeline(
+    if args.output is not None and args.output_dir is not None:
+        parser.error('--output and --output-dir cannot be used together')
+    if args.output is not None and (not args.image or len(args.image) != 1):
+        parser.error('--output requires exactly one --image input')
+
+    confirmation_frames = args.confirm_frames
+    if confirmation_frames is None:
+        confirmation_frames = 1 if args.image else 2
+
+    pipeline = Pipeline(
         model_path=args.model,
         camera_index=args.camera,
         num_decks=args.decks,
         conf_threshold=args.conf,
-        confirmation_frames=args.confirm_frames,
+        confirmation_frames=confirmation_frames,
         empty_reset_frames=args.empty_reset_frames,
-    ).run()
+    )
+
+    if args.image:
+        summaries = pipeline.run_images(
+            args.image,
+            output_path=args.output,
+            output_dir=args.output_dir,
+            show=args.show_image,
+        )
+        print(json.dumps(summaries, indent=2))
+        return
+
+    pipeline.run()
 
 
 if __name__ == '__main__':

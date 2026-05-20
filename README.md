@@ -14,6 +14,18 @@ running card counter/advisor.
 python3 -m src.vision.pipeline --camera 0
 ```
 
+For a static image instead of a live camera:
+
+```bash
+python3 -m src.vision.pipeline --image path/to/blackjack-table.jpg --output annotated.jpg
+```
+
+For several round images in one shoe:
+
+```bash
+python3 -m src.vision.pipeline --image round1.jpg round2.jpg round3.jpg --output-dir annotated
+```
+
 Controls:
 
 - `r`: reset the visible round, keeping the shoe count

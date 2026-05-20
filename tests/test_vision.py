@@ -226,3 +226,42 @@ def test_pipeline_process_frame_feeds_confirmed_cards_to_counter():
     pipeline.reset_shoe()
     assert pipeline.counted_cards == []
     assert pipeline.advisor.counter.cards_seen == 0
+
+
+def test_pipeline_process_image_file_writes_annotated_summary(tmp_path):
+    class FakeDetector:
+        def detect(self, frame):
+            return [
+                det('A', 100, 50, 170, 130),
+                det('5', 100, 400, 170, 480),
+                det('10', 220, 400, 290, 480),
+            ]
+
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.camera_index = 0
+    pipeline.detector = FakeDetector()
+    pipeline.advisor = BlackjackAdvisor(num_decks=6)
+    pipeline.parser = None
+    pipeline.confirmation_frames = 1
+    pipeline.empty_reset_frames = 8
+    pipeline._last_recommendation = None
+    pipeline.counted_cards = []
+    pipeline._reset_button_rect = None
+
+    import cv2
+    import numpy as np
+
+    image_path = tmp_path / "round.jpg"
+    output_path = tmp_path / "round_annotated.jpg"
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    assert cv2.imwrite(str(image_path), frame)
+
+    summary = pipeline.process_image_file(image_path, output_path)
+
+    assert output_path.exists()
+    assert summary["dealer_cards"] == ["A"]
+    assert summary["player_cards"] == ["5", "10"]
+    assert summary["counted_cards"] == ["A", "5", "10"]
+    assert summary["recommendation"] is not None
+    assert summary["count"]["cards_seen"] == 3
+    assert summary["count"]["running_count"] == -1
