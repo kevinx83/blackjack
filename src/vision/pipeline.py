@@ -26,6 +26,7 @@ from src.vision.detector import CardDetector, Detection
 from src.vision.state_parser import GameState, StateParser
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / 'detect' / 'weights' / 'best.pt'
+DEFAULT_IMAGE_OUTPUT_DIR = Path('test_output')
 WINDOW_NAME = 'BlackjackAI'
 SIDE_PANEL_WIDTH = 300
 COUNTED_HISTORY_LIMIT = 120
@@ -157,8 +158,7 @@ class Pipeline:
         return self._image_summary(image_path, output_path, result)
 
     def _default_image_output_path(self, image_path: Path, output_dir: Path | None) -> Path | None:
-        if output_dir is None:
-            return None
+        output_dir = output_dir or DEFAULT_IMAGE_OUTPUT_DIR
         suffix = image_path.suffix if image_path.suffix else '.jpg'
         return output_dir / f"{image_path.stem}_annotated{suffix}"
 

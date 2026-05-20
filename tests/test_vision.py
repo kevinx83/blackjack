@@ -1,6 +1,8 @@
 """Tests for the vision pipeline components (no camera required)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from src.decision.engine import BlackjackAdvisor
@@ -325,3 +327,13 @@ def test_pipeline_process_image_file_writes_annotated_summary(tmp_path):
     assert summary["recommendation"] is not None
     assert summary["count"]["cards_seen"] == 3
     assert summary["count"]["running_count"] == -1
+
+
+def test_pipeline_default_image_output_path_uses_test_output():
+    pipeline = Pipeline.__new__(Pipeline)
+
+    default_path = pipeline._default_image_output_path(Path("static/image2.png"), None)
+    custom_path = pipeline._default_image_output_path(Path("static/image2.png"), Path("custom"))
+
+    assert default_path == Path("test_output/image2_annotated.png")
+    assert custom_path == Path("custom/image2_annotated.png")

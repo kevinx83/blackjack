@@ -17,8 +17,10 @@ python3 -m src.vision.pipeline --camera 0
 For a static image instead of a live camera:
 
 ```bash
-python3 -m src.vision.pipeline --image path/to/blackjack-table.jpg --output annotated.jpg
+python3 -m src.vision.pipeline --image static/image2.png
 ```
+
+This writes `test_output/image2_annotated.png` by default.
 
 For several round images in one shoe:
 
