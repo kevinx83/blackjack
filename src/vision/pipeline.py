@@ -7,7 +7,7 @@ Usage:
 
 Keys:
     r — new round  (resets seen cards, keeps count)
-    n — new shoe   (resets count + round)
+    n — new shoe   (resets count + round + counted-card history)
     q — quit
 """
 from __future__ import annotations
@@ -24,6 +24,10 @@ from src.vision.detector import CardDetector, Detection
 from src.vision.state_parser import GameState, StateParser
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / 'detect' / 'weights' / 'best.pt'
+WINDOW_NAME = 'BlackjackAI'
+SIDE_PANEL_WIDTH = 300
+COUNTED_HISTORY_LIMIT = 120
+COUNTED_HISTORY_ROWS = 18
 
 _ACTION_COLORS: dict[str, tuple[int, int, int]] = {
     'HIT':       (0,   200,   0),
@@ -60,6 +64,8 @@ class Pipeline:
         self.confirmation_frames = confirmation_frames
         self.empty_reset_frames = empty_reset_frames
         self._last_recommendation: Recommendation | None = None
+        self.counted_cards: list[str] = []
+        self._reset_button_rect: tuple[int, int, int, int] | None = None
 
     def run(self) -> None:
         cap = self._open_camera()
@@ -67,6 +73,9 @@ class Pipeline:
             raise RuntimeError(self._camera_error_message())
 
         try:
+            cv2.namedWindow(WINDOW_NAME)
+            cv2.setMouseCallback(WINDOW_NAME, self._handle_mouse)
+
             while True:
                 ret, frame = cap.read()
                 if not ret:
@@ -80,21 +89,35 @@ class Pipeline:
                     result.recommendation,
                     result.count_status,
                 )
-                cv2.imshow('BlackjackAI', frame)
+                cv2.imshow(WINDOW_NAME, frame)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     break
                 elif key == ord('r'):
-                    self.parser.new_round()
-                    self._last_recommendation = None
+                    self.reset_round()
                 elif key == ord('n'):
-                    self.advisor.new_shoe()
-                    self.parser.new_round()
-                    self._last_recommendation = None
+                    self.reset_shoe()
         finally:
             cap.release()
             cv2.destroyAllWindows()
+
+    def reset_round(self) -> None:
+        if self.parser is not None:
+            self.parser.new_round()
+        self._last_recommendation = None
+
+    def reset_shoe(self) -> None:
+        self.advisor.new_shoe()
+        self.reset_round()
+        self.counted_cards = []
+
+    def _handle_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
+        if event != cv2.EVENT_LBUTTONDOWN or self._reset_button_rect is None:
+            return
+        x1, y1, x2, y2 = self._reset_button_rect
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            self.reset_shoe()
 
     def _open_camera(self) -> cv2.VideoCapture:
         if hasattr(cv2, 'CAP_AVFOUNDATION'):
@@ -133,6 +156,8 @@ class Pipeline:
 
         if state.new_cards:
             self.advisor.observe(*state.new_cards)
+            self.counted_cards.extend(card.rank for card in state.new_cards)
+            self.counted_cards = self.counted_cards[-COUNTED_HISTORY_LIMIT:]
 
         rec = self._last_recommendation
         if self.parser.dealer_upcard and state.player_cards:
@@ -181,7 +206,7 @@ class Pipeline:
         self._draw_count_status(frame, count_status)
         cv2.putText(frame, 'r=round  n=shoe  q=quit',
                     (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1)
-        return frame
+        return self._draw_side_panel(frame, count_status)
 
     def _draw_zone_line(self, frame: np.ndarray, w: int, y: int) -> None:
         cv2.line(frame, (0, y), (w, y), (0, 255, 255), 1)
@@ -230,6 +255,63 @@ class Pipeline:
             cv2.putText(frame, line, (10, y),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (245, 245, 245), 2)
             y += 24
+
+    def _draw_side_panel(self, frame: np.ndarray, count_status: dict) -> np.ndarray:
+        h, w = frame.shape[:2]
+        panel_x = w
+        canvas = np.full((h, w + SIDE_PANEL_WIDTH, 3), (18, 27, 24), dtype=frame.dtype)
+        canvas[:, :w] = frame
+
+        cv2.rectangle(canvas, (panel_x, 0), (w + SIDE_PANEL_WIDTH - 1, h - 1), (28, 38, 34), -1)
+        cv2.line(canvas, (panel_x, 0), (panel_x, h), (78, 92, 84), 1)
+
+        x = panel_x + 18
+        y = 34
+        cv2.putText(canvas, 'SHOE CONTROL', (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.62, (236, 236, 226), 2)
+
+        y += 36
+        status_lines = [
+            f"Running count {count_status['running_count']:+.0f}",
+            f"True count {count_status['true_count']:+.1f}",
+            f"Cards seen {count_status['cards_seen']}",
+            f"Decks left {count_status['decks_remaining']:.1f}",
+        ]
+        for line in status_lines:
+            cv2.putText(canvas, line, (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (218, 222, 214), 1)
+            y += 24
+
+        y += 14
+        button_x1, button_y1 = x, y
+        button_x2, button_y2 = panel_x + SIDE_PANEL_WIDTH - 18, y + 42
+        cv2.rectangle(canvas, (button_x1, button_y1), (button_x2, button_y2), (45, 126, 86), -1)
+        cv2.rectangle(canvas, (button_x1, button_y1), (button_x2, button_y2), (91, 172, 128), 1)
+        cv2.putText(canvas, 'Reset shoe (N)', (button_x1 + 16, button_y1 + 27),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.56, (250, 250, 242), 2)
+        self._reset_button_rect = (button_x1, button_y1, button_x2, button_y2)
+
+        y = button_y2 + 42
+        cv2.putText(canvas, 'COUNTED CARDS', (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.58, (236, 236, 226), 2)
+        y += 28
+
+        recent_cards = self.counted_cards[-COUNTED_HISTORY_ROWS:]
+        if not recent_cards:
+            cv2.putText(canvas, 'No cards counted yet', (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (160, 170, 164), 1)
+            return canvas
+
+        first_index = len(self.counted_cards) - len(recent_cards) + 1
+        for offset, card in enumerate(recent_cards):
+            label = f"{first_index + offset:>3}. {card}"
+            cv2.putText(canvas, label, (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (232, 232, 220), 1)
+            y += 24
+            if y > h - 18:
+                break
+
+        return canvas
 
 
 def main() -> None:

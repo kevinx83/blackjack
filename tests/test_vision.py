@@ -206,6 +206,8 @@ def test_pipeline_process_frame_feeds_confirmed_cards_to_counter():
     pipeline.confirmation_frames = 2
     pipeline.empty_reset_frames = 8
     pipeline._last_recommendation = None
+    pipeline.counted_cards = []
+    pipeline._reset_button_rect = None
 
     import numpy as np
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
@@ -218,4 +220,9 @@ def test_pipeline_process_frame_feeds_confirmed_cards_to_counter():
     assert [card.rank for card in second.state.new_cards] == ['A', '5', '10']
     assert second.count_status['cards_seen'] == 3
     assert second.count_status['running_count'] == -1
+    assert pipeline.counted_cards == ['A', '5', '10']
     assert second.recommendation is not None
+
+    pipeline.reset_shoe()
+    assert pipeline.counted_cards == []
+    assert pipeline.advisor.counter.cards_seen == 0
