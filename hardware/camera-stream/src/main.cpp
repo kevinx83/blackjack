@@ -11,24 +11,24 @@ namespace
 
   WebServer server(80);
 
-  // Freenove OV3660-style camera pin mapping.
-  // If your exact module differs, change only this section.
-  constexpr int kPwdnPin = -1;
+  // Freenove firmware camera pin mapping.
+  // Pinout for Freenove ESP32-S3-WROOM (OV3660)
+  constexpr int kPwdnPin  = -1;
   constexpr int kResetPin = -1;
-  constexpr int kXclkPin = 21;
-  constexpr int kSiodPin = 26;
-  constexpr int kSiocPin = 27;
-  constexpr int kY9Pin = 35;
-  constexpr int kY8Pin = 34;
-  constexpr int kY7Pin = 39;
-  constexpr int kY6Pin = 36;
-  constexpr int kY5Pin = 19;
-  constexpr int kY4Pin = 18;
-  constexpr int kY3Pin = 5;
-  constexpr int kY2Pin = 4;
-  constexpr int kVsyncPin = 25;
-  constexpr int kHrefPin = 23;
-  constexpr int kPclkPin = 22;
+  constexpr int kXclkPin  = 15;
+  constexpr int kSiodPin  =  4;   
+  constexpr int kSiocPin  =  5;  
+  constexpr int kY9Pin    = 16; 
+  constexpr int kY8Pin    = 17;
+  constexpr int kY7Pin    = 18;
+  constexpr int kY6Pin    = 12;
+  constexpr int kY5Pin    = 10;
+  constexpr int kY4Pin    =  8;
+  constexpr int kY3Pin    =  9;
+  constexpr int kY2Pin    = 11;
+  constexpr int kVsyncPin =  6;
+  constexpr int kHrefPin  =  7;
+  constexpr int kPclkPin  = 13;
 
   constexpr char kStreamBoundary[] = "123456789000000000000987654321";
 
@@ -60,7 +60,7 @@ namespace
     config.pin_pwdn = kPwdnPin;
     config.pin_reset = kResetPin;
 
-    config.xclk_freq_hz = 10000000;
+    config.xclk_freq_hz = 20000000;
     config.pixel_format = PIXFORMAT_JPEG;
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -77,13 +77,14 @@ namespace
       config.frame_size = FRAMESIZE_QQVGA;
       config.fb_location = CAMERA_FB_IN_DRAM;
     }
-
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK)
     {
       Serial.printf("Camera init failed: 0x%x\n", err);
       return false;
     }
+
+    delay(100); // give sensor time to initialize
 
     sensor_t *sensor = esp_camera_sensor_get();
     if (sensor != nullptr && sensor->id.PID == OV3660_PID)
@@ -163,13 +164,15 @@ void setup()
   delay(200);
 
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(kApSsid, kApPassword);
+  const bool apStarted = WiFi.softAP(kApSsid, kApPassword);
   WiFi.setSleep(false);
 
   Serial.println();
   Serial.println("ESP32 camera starting...");
   Serial.print("AP SSID: ");
   Serial.println(kApSsid);
+  Serial.print("AP started: ");
+  Serial.println(apStarted ? "yes" : "no");
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());
 
