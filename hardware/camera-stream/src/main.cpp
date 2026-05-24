@@ -13,22 +13,25 @@ namespace
 
   // Freenove firmware camera pin mapping.
   // Pinout for Freenove ESP32-S3-WROOM (OV3660)
-  constexpr int kPwdnPin  = -1;
+  constexpr int kPwdnPin = -1;
   constexpr int kResetPin = -1;
-  constexpr int kXclkPin  = 15;
-  constexpr int kSiodPin  =  4;   
-  constexpr int kSiocPin  =  5;  
-  constexpr int kY9Pin    = 16; 
-  constexpr int kY8Pin    = 17;
-  constexpr int kY7Pin    = 18;
-  constexpr int kY6Pin    = 12;
-  constexpr int kY5Pin    = 10;
-  constexpr int kY4Pin    =  8;
-  constexpr int kY3Pin    =  9;
-  constexpr int kY2Pin    = 11;
-  constexpr int kVsyncPin =  6;
-  constexpr int kHrefPin  =  7;
-  constexpr int kPclkPin  = 13;
+  constexpr int kXclkPin = 15;
+  constexpr int kSiodPin = 4;
+  constexpr int kSiocPin = 5;
+  constexpr int kY9Pin = 16;
+  constexpr int kY8Pin = 17;
+  constexpr int kY7Pin = 18;
+  constexpr int kY6Pin = 12;
+  constexpr int kY5Pin = 10;
+  constexpr int kY4Pin = 8;
+  constexpr int kY3Pin = 9;
+  constexpr int kY2Pin = 11;
+  constexpr int kVsyncPin = 6;
+  constexpr int kHrefPin = 7;
+  constexpr int kPclkPin = 13;
+
+  constexpr framesize_t kHighResFrameSize = FRAMESIZE_UXGA;
+  constexpr framesize_t kFallbackFrameSize = FRAMESIZE_VGA;
 
   constexpr char kStreamBoundary[] = "123456789000000000000987654321";
 
@@ -64,17 +67,17 @@ namespace
     config.pixel_format = PIXFORMAT_JPEG;
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     config.fb_location = CAMERA_FB_IN_PSRAM;
-    config.jpeg_quality = 12;
+    config.jpeg_quality = 8;
     config.fb_count = 1;
 
     if (psramFound())
     {
-      config.frame_size = FRAMESIZE_HQVGA;
+      config.frame_size = kHighResFrameSize;
       config.fb_count = 2;
     }
     else
     {
-      config.frame_size = FRAMESIZE_QQVGA;
+      config.frame_size = kFallbackFrameSize;
       config.fb_location = CAMERA_FB_IN_DRAM;
     }
     esp_err_t err = esp_camera_init(&config);
@@ -146,8 +149,6 @@ namespace
       client.write(fb->buf, fb->len);
       client.print(F("\r\n"));
       esp_camera_fb_return(fb);
-
-      delay(1);
     }
   }
 
