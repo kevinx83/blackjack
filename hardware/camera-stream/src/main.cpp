@@ -93,7 +93,7 @@ namespace
     if (sensor != nullptr && sensor->id.PID == OV3660_PID)
     {
       sensor->set_vflip(sensor, 1);
-      sensor->set_hmirror(sensor, 1);
+      sensor->set_hmirror(sensor, 0);
       sensor->set_brightness(sensor, 1);
       sensor->set_saturation(sensor, 0);
       sensor->set_ae_level(sensor, -2);
